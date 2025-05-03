@@ -5,9 +5,8 @@ import time
 from typing import Dict, Any, List, Optional
 
 import utils
-import database # Cần DB để lấy audit log cho export
+import database 
 
-# Import các module ghi file
 from reporting import csv_writer, json_writer
 
 log = logging.getLogger(__name__)

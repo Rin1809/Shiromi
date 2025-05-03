@@ -11,7 +11,7 @@ import config
 import utils
 import database
 import discord_logging
-from reporting import embeds_guild # Cần cho hằng số
+from reporting import embeds_guild
 
 log = logging.getLogger(__name__)
 

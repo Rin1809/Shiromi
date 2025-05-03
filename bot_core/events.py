@@ -7,16 +7,16 @@ from discord.ext import commands
 
 import config
 import utils
-import database # Cần DB để xử lý lỗi liên quan đến DB
-import discord_logging # Cần để lấy target thread
+import database 
+import discord_logging 
 
 log = logging.getLogger(__name__)
 
 async def handle_on_ready(bot: commands.Bot):
     """Xử lý sự kiện khi bot sẵn sàng."""
-    e = lambda n: utils.get_emoji(n, bot) # Hàm lambda tiện lợi lấy emoji
+    e = lambda n: utils.get_emoji(n, bot) 
 
-    print("-" * 50) # Phân cách log khởi động trên console
+    print("-" * 50) 
     log.info(f'{e("success")} Đã đăng nhập với tư cách [bold cyan]{bot.user.name}[/] (ID: {bot.user.id})')
     log.info(f' discord.py [blue]{discord.__version__}[/]')
     log.info(f' Python [green]{sys.version.split(" ")[0]}[/]')
@@ -24,8 +24,8 @@ async def handle_on_ready(bot: commands.Bot):
     try:
         # Đếm emoji tùy chỉnh bot có thể truy cập
         # Không cần fetch ở đây nếu bot đã cache đủ, nhưng fetch đảm bảo hơn
-        custom_emojis = bot.emojis # Lấy từ cache trước
-        if not custom_emojis: # Nếu cache rỗng, thử fetch
+        custom_emojis = bot.emojis 
+        if not custom_emojis:
              log.debug("Cache emoji rỗng, đang thử fetch...")
              custom_emojis = await bot.fetch_emojis()
         log.info(f"{e('mention')} Đã tải [magenta]{len(custom_emojis)}[/] emoji tùy chỉnh.")
@@ -44,8 +44,8 @@ async def handle_on_ready(bot: commands.Bot):
     ]
     missing_emoji_report = []
     for name in required_emojis:
-        emoji_val = utils.get_emoji(name, bot) # Lấy emoji đã cache hoặc fallback
-        is_placeholder = ':123' in emoji_val # Kiểm tra ID placeholder đơn giản
+        emoji_val = utils.get_emoji(name, bot)
+        is_placeholder = ':123' in emoji_val 
         is_fallback = emoji_val == utils.EMOJI_IDS.get(name, "❓") and name in utils.EMOJI_IDS
         is_missing = emoji_val == "❓" and name not in utils.EMOJI_IDS # Thực sự thiếu
 
@@ -97,11 +97,11 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
     # --- KẾT THÚC LOG DEBUG ---
 
     original_exception = None
-    original_error_info = "" # Khởi tạo chuỗi thông tin lỗi gốc
+    original_error_info = "" 
 
     if isinstance(error, commands.CommandInvokeError):
         original_exception = error.original
-        original_error_info = f"\n   [bold]Lỗi gốc:[/bold] {type(original_exception).__name__}: {original_exception}" # Định dạng log gốc
+        original_error_info = f"\n   [bold]Lỗi gốc:[/bold] {type(original_exception).__name__}: {original_exception}" 
         # --- LOG DEBUG LỖI GỐC ---
         log.debug(f"--> Original Exception Type: {type(original_exception).__name__}")
         log.debug(f"--> Original Exception Value: {original_exception}")
@@ -110,7 +110,7 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
             # Tạo chuỗi traceback thủ công
             tb_lines = traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__)
             tb_string = "".join(tb_lines)
-            log.error(f"--> Original Exception Traceback:\n{tb_string}") # Log với cấp độ ERROR để dễ thấy
+            log.error(f"--> Original Exception Traceback:\n{tb_string}") 
         except Exception as tb_err:
             log.warning(f"Không thể log traceback của lỗi gốc: {tb_err}")
         # --- KẾT THÚC LOG DEBUG LỖI GỐC ---
@@ -133,7 +133,7 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
 
     # --- Chuẩn bị tin nhắn phản hồi cho người dùng ---
     msg = None
-    reset_cooldown = False # Cờ để reset cooldown nếu lỗi do bot/môi trường
+    reset_cooldown = False 
 
     # Phân loại lỗi và tạo tin nhắn phản hồi thân thiện
     if isinstance(error, commands.MissingPermissions):
@@ -234,6 +234,5 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
         ctx.command.reset_cooldown(ctx)
         log.info(f"Đã reset cooldown cho lệnh '{ctx.command.qualified_name}' của user {ctx.author.id} do lỗi.")
 
-    log.debug(f"--- on_command_error finished ---") # Log kết thúc xử lý lỗi
-
+    log.debug(f"--- on_command_error finished ---") 
 # --- END OF FILE bot_core/events.py ---

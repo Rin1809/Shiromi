@@ -9,7 +9,7 @@ import traceback
 import time
 from typing import List, Optional, Dict, Any
 
-import utils # Cần utils để lấy emoji
+import utils
 
 # --- Globals cho Discord Logging ---
 log_queue = queue.Queue(-1) # Queue không giới hạn kích thước

@@ -5,22 +5,24 @@ import math
 import logging
 import collections
 from typing import List, Dict, Any, Optional, Union
-from discord.ext import commands # Cần Context để lấy author nếu có
+from discord.ext import commands
+from collections import Counter
+import asyncio
 
-# Relative import
+
 try:
     from .. import utils
+    from .. import config 
 except ImportError:
     import utils
+    import config
 
 log = logging.getLogger(__name__)
 
 # --- Constants ---
-VOICE_CHANNELS_PER_EMBED = 20   # Số kênh voice tĩnh mỗi embed
-BOOSTERS_PER_EMBED = 20         # Số booster mỗi embed
-ROLES_PER_EMBED = 25            # Số role mỗi embed
-FIRST_MESSAGES_LIMIT = 10       # Số tin nhắn đầu tiên hiển thị trong log
-FIRST_MESSAGES_CONTENT_PREVIEW = 100 # Độ dài preview nội dung tin nhắn đầu
+VOICE_CHANNELS_PER_EMBED = 20
+FIRST_MESSAGES_LIMIT = 10
+FIRST_MESSAGES_CONTENT_PREVIEW = 100
 
 
 # --- Embed Creation Functions ---
@@ -38,33 +40,65 @@ async def create_summary_embed(
     initial_member_status_counts: collections.Counter,
     channel_counts: collections.Counter,
     all_roles_count: int,
-    start_time: datetime.datetime, # Thời điểm bắt đầu quét
-    ctx: Optional[commands.Context] = None, # Context để lấy tên người yêu cầu
-    overall_total_reaction_count: Optional[int] = None # Tổng reaction nếu quét
+    start_time: datetime.datetime,
+    scan_data: Dict[str, Any],
+    ctx: Optional[commands.Context] = None,
+    overall_total_reaction_count: Optional[int] = None 
 ) -> discord.Embed:
-    """Tạo embed tóm tắt chính thông tin server và kết quả quét."""
+    """Tạo embed tóm tắt chính thông tin server và kết quả quét (đã nâng cấp)."""
     e = lambda name: utils.get_emoji(name, bot)
 
     # --- Chuẩn bị các giá trị hiển thị ---
     explicit_filter = str(server.explicit_content_filter).replace('_', ' ').title()
     mfa_level = "Yêu cầu (Cho Mod)" if server.mfa_level >= discord.MFALevel.require_2fa else "Không yêu cầu"
     notifications = "Chỉ @mention" if server.default_notifications == discord.NotificationLevel.only_mentions else "Tất cả tin nhắn"
-    sys_channel_mention = server.system_channel.mention if server.system_channel else "Không có"
-    rules_channel_mention = server.rules_channel.mention if server.rules_channel else "Không có"
-    public_updates_channel_mention = server.public_updates_channel.mention if server.public_updates_channel else "Không có"
-    afk_channel_mention = server.afk_channel.mention if server.afk_channel else "Không có"
-    afk_timeout_str = f"{server.afk_timeout // 60} phút" if server.afk_timeout >= 60 else "N/A"
 
-    # Tính năng server
-    features_str = ", ".join(server.features) if server.features else "Không có"
-    if len(features_str) > 800: features_str = features_str[:800] + "... (nhiều)"
-
-    # Đếm user/bot từ cache (có thể không chính xác 100% nếu intent members tắt)
     member_count = len([m for m in server.members if not m.bot])
     bot_count = len([m for m in server.members if m.bot])
 
-    # Chuỗi tóm tắt kết quả quét
-    reaction_line = f"\n{e('reaction')} Tổng **{overall_total_reaction_count:,}** biểu cảm." if overall_total_reaction_count is not None else ""
+    # --- NÂNG CẤP: Lấy top custom emoji/sticker server ---
+    top_custom_emojis_str = "N/A"
+    top_custom_stickers_str = "N/A"
+
+    # Lấy top custom emoji reactions (đã lọc)
+    filtered_reaction_counts = scan_data.get("filtered_reaction_emoji_counts", Counter())
+    custom_emoji_reactions = {eid: count for eid, count in filtered_reaction_counts.items() if isinstance(eid, int)} # Chỉ lấy ID emoji
+    if custom_emoji_reactions:
+        sorted_custom_reactions = sorted(custom_emoji_reactions.items(), key=lambda item: item[1], reverse=True)
+        top_emojis = []
+        for emoji_id, count in sorted_custom_reactions[:5]: # Lấy top 5
+            emoji_obj = bot.get_emoji(emoji_id)
+            if emoji_obj:
+                top_emojis.append(f"{str(emoji_obj)} ({count:,})")
+        if top_emojis:
+            top_custom_emojis_str = " ".join(top_emojis)
+
+    # Lấy top custom stickers server (đã đếm trong scan_channels)
+    custom_sticker_counts = scan_data.get("overall_custom_sticker_counts", Counter())
+    if custom_sticker_counts:
+        sorted_custom_stickers = custom_sticker_counts.most_common(5) # Lấy top 5
+        top_stickers = []
+        # Fetch tên sticker (có thể chậm nếu nhiều) - Cân nhắc chỉ hiển thị ID nếu cần tối ưu
+        sticker_cache = {}
+        async def fetch_sticker_name(sid):
+             if sid not in sticker_cache:
+                 try: sticker_cache[sid] = await bot.fetch_sticker(sid)
+                 except: sticker_cache[sid] = None
+             return sticker_cache[sid]
+
+        fetch_tasks = [fetch_sticker_name(sid) for sid, count in sorted_custom_stickers]
+        await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        for sticker_id, count in sorted_custom_stickers:
+             sticker_obj = sticker_cache.get(sticker_id)
+             name = f"`{sticker_obj.name}`" if sticker_obj else f"`ID:{sticker_id}`"
+             top_stickers.append(f"{name} ({count:,})")
+        if top_stickers:
+             top_custom_stickers_str = ", ".join(top_stickers)
+
+    # Chuỗi tóm tắt kết quả quét (sử dụng reaction đã lọc)
+    filtered_reaction_count = sum(filtered_reaction_counts.values())
+    reaction_line = f"\n{e('reaction')} Tổng **{filtered_reaction_count:,}** biểu cảm (lọc)." if config.ENABLE_REACTION_SCAN else ""
     scan_summary = (
         f"Quét **{processed_channels_count:,}** kênh text/voice ({skipped_channels_count} lỗi/bỏ qua).\n"
         f"Quét **{processed_threads_count:,}** luồng ({skipped_threads_count} lỗi/bỏ qua).\n"
@@ -76,376 +110,125 @@ async def create_summary_embed(
 
     # --- Tạo Embed ---
     summary_embed = discord.Embed(
-        title=f"{e('stats')} Báo cáo Quét Sâu Server: {server.name}",
+        title=f"{e('star')} Tổng Quan Server: {server.name} {e('star')}",
         description=scan_summary,
         color=discord.Color.purple(),
-        timestamp=start_time + overall_duration # Timestamp là lúc quét xong
+        timestamp=start_time + overall_duration
     )
     if server.icon:
         summary_embed.set_thumbnail(url=server.icon.url)
 
     # --- Thêm Fields ---
-    # Thông tin cơ bản
-    summary_embed.add_field(name=f"{e('id_card')} Server ID", value=f"`{server.id}`", inline=True)
-
-    # Lấy thông tin Owner
     owner = server.owner
-    if not owner and server.owner_id: # Fetch nếu chưa có trong cache
-        try:
-            owner = await utils.fetch_user_data(server, server.owner_id, bot_ref=bot)
-        except Exception as owner_err:
-             log.warning(f"Lỗi fetch owner {server.owner_id}: {owner_err}")
-             owner = None
+    if not owner and server.owner_id:
+        try: owner = await utils.fetch_user_data(server, server.owner_id, bot_ref=bot)
+        except Exception as owner_err: log.warning(f"Lỗi fetch owner {server.owner_id}: {owner_err}"); owner = None
     owner_mention = owner.mention if owner else (f'`{server.owner_id}` (Không rõ)' if server.owner_id else 'Không rõ')
     summary_embed.add_field(name=f"{e('crown')} Chủ sở hữu", value=owner_mention, inline=True)
-
     summary_embed.add_field(name=f"{e('calendar')} Ngày tạo", value=utils.format_discord_time(server.created_at, 'D'), inline=True)
+    summary_embed.add_field(name=f"{e('boost')} Boost", value=f"Cấp {server.premium_tier} ({server.premium_subscription_count})", inline=True)
 
-    # Số lượng members
     summary_embed.add_field(name=f"{e('members')} Tổng Members", value=f"{server.member_count:,} (Cache)", inline=True)
     summary_embed.add_field(name="🧑‍🤝‍🧑 Users", value=f"{member_count:,}", inline=True)
     summary_embed.add_field(name=f"{e('bot_tag')} Bots", value=f"{bot_count:,}", inline=True)
 
-    # Thông tin Boost và Cài đặt
-    summary_embed.add_field(name=f"{e('boost')} Cấp Boost", value=f"Cấp {server.premium_tier}", inline=True)
-    summary_embed.add_field(name=f"{e('boost')} Số Boost", value=f"{server.premium_subscription_count}", inline=True)
-    summary_embed.add_field(name=f"{e('success')} Xác minh", value=str(server.verification_level).capitalize(), inline=True)
-    summary_embed.add_field(name=f"{e('shield')} Lọc Nội dung", value=explicit_filter, inline=True)
-    summary_embed.add_field(name=f"{e('lock')} MFA", value=mfa_level, inline=True)
-    summary_embed.add_field(name=f"{e('bell')} Thông báo", value=notifications, inline=True)
-
-    # Thống kê kênh
+    # Thống kê kênh (giữ nguyên)
     channel_stats_lines = [
         f"{utils.get_channel_type_emoji(discord.ChannelType.text, bot)} Text: {channel_counts.get(discord.ChannelType.text, 0)}",
         f"{utils.get_channel_type_emoji(discord.ChannelType.voice, bot)} Voice: {channel_counts.get(discord.ChannelType.voice, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.category, bot)} Category: {channel_counts.get(discord.ChannelType.category, 0)}",
+        f"{utils.get_channel_type_emoji(discord.ChannelType.category, bot)} Cat: {channel_counts.get(discord.ChannelType.category, 0)}",
         f"{utils.get_channel_type_emoji(discord.ChannelType.stage_voice, bot)} Stage: {channel_counts.get(discord.ChannelType.stage_voice, 0)}",
         f"{utils.get_channel_type_emoji(discord.ChannelType.forum, bot)} Forum: {channel_counts.get(discord.ChannelType.forum, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.public_thread, bot)} Thread (đã quét): {processed_threads_count}"
+        f"{utils.get_channel_type_emoji(discord.ChannelType.public_thread, bot)} Thread: {processed_threads_count}"
     ]
     summary_embed.add_field(
         name=f"{e('info')} Kênh ({sum(channel_counts.values())}) & Luồng",
         value=" | ".join(channel_stats_lines),
-        inline=False # Để full width
+        inline=False
     )
 
-    # Số lượng Roles, Emojis, Stickers
-    summary_embed.add_field(name=f"{e('role')} Roles", value=f"{all_roles_count:,}", inline=True)
-    summary_embed.add_field(name=f"{utils.get_emoji('mention', bot)} Emojis", value=f"{len(server.emojis):,}", inline=True)
-    summary_embed.add_field(name=f"{utils.get_emoji('sticker', bot)} Stickers", value=f"{len(server.stickers):,}", inline=True)
-
-    # Các kênh đặc biệt
-    summary_embed.add_field(name=f"{e('text_channel')} Kênh Hệ thống", value=sys_channel_mention, inline=True)
-    summary_embed.add_field(name=f"{e('rules')} Kênh Luật lệ", value=rules_channel_mention, inline=True)
-    summary_embed.add_field(name=f"{e('megaphone')} Kênh Cập nhật", value=public_updates_channel_mention, inline=True)
-    summary_embed.add_field(name=f"{e('zzz')} Kênh AFK", value=afk_channel_mention, inline=True)
-    summary_embed.add_field(name=f"{e('clock')} AFK Timeout", value=afk_timeout_str, inline=True)
-    summary_embed.add_field(name="\u200b", value="\u200b", inline=True) # Field trống để căn chỉnh
-
-    # Trạng thái members
-    status_stats = (
-        f"{utils.map_status(discord.Status.online, bot)}: {initial_member_status_counts.get('online', 0)}\n"
-        f"{utils.map_status(discord.Status.idle, bot)}: {initial_member_status_counts.get('idle', 0)}\n"
-        f"{utils.map_status(discord.Status.dnd, bot)}: {initial_member_status_counts.get('dnd', 0)}\n"
-        f"{utils.map_status(discord.Status.offline, bot)}: {initial_member_status_counts.get('offline', 0) + initial_member_status_counts.get('invisible', 0)}"
+    # --- NÂNG CẤP: Field Điểm Nhấn ---
+    summary_embed.add_field(
+        name=f"{e('star')} Điểm Nhấn Server",
+        value=(
+            f"{utils.get_emoji('mention', bot)} **Custom Emojis:** {len(server.emojis):,} (Top: {top_custom_emojis_str})\n"
+            f"{e('sticker')} **Custom Stickers:** {len(server.stickers):,} (Top: {top_custom_stickers_str})\n"
+            f"{e('role')} **Roles:** {all_roles_count:,}"
+        ),
+        inline=False
     )
-    summary_embed.add_field(name=f"{e('members')} Trạng thái Member (Khi quét)", value=status_stats, inline=False)
-
-    # Tính năng server
-    summary_embed.add_field(name=f"{e('star')} Tính năng Server", value=features_str, inline=False)
 
     # Footer
     footer_text = f"ID Server: {server.id}"
-    if ctx:
-        footer_text += f" | Yêu cầu bởi: {ctx.author.display_name} ({ctx.author.id})"
+    if ctx: footer_text += f" | Yêu cầu bởi: {ctx.author.display_name} ({ctx.author.id})"
     summary_embed.set_footer(text=footer_text)
 
     return summary_embed
 
 
-async def create_text_channel_embed(
-    detail: Dict[str, Any], # Dữ liệu chi tiết của kênh từ scan_data['channel_details']
-    bot: discord.Client
-) -> discord.Embed:
-    """Tạo embed hiển thị chi tiết của một kênh text hoặc voice đã quét."""
+async def create_channel_activity_embed( # Đổi tên hàm cho rõ nghĩa
+    guild: discord.Guild,
+    bot: discord.Client,
+    channel_details: List[Dict[str, Any]],
+    voice_channel_static_data: List[Dict[str, Any]] # Thêm data kênh voice tĩnh
+) -> Optional[discord.Embed]:
+    """Tạo embed hiển thị top kênh text/voice hoạt động."""
     e = lambda name: utils.get_emoji(name, bot)
-    channel_id = detail.get('id', 'N/A')
-    channel_name = detail.get('name', 'Không rõ')
-    channel_type_str = detail.get("type", "unknown")
-    channel_error = detail.get("error")
-    processed = detail.get("processed", False)
-    channel_msg_count = detail.get('message_count', 0)
 
-    is_voice_channel = channel_type_str == str(discord.ChannelType.voice)
-    channel_type_name = "Voice" if is_voice_channel else "Text"
-    channel_type_emoji = utils.get_channel_type_emoji(channel_type_str, bot)
-
-    # --- Xử lý trường hợp lỗi nghiêm trọng (không quét được gì) ---
-    if channel_error and not processed:
-        error_embed = discord.Embed(
-            title=f"{e('error')} Kênh {channel_type_name}: #{utils.escape_markdown(channel_name)}",
-            description=f"**Lỗi nghiêm trọng khi quét:**\n```\n{utils.escape_markdown(str(channel_error))}\n```",
-            color=discord.Color.dark_red()
-        )
-        error_embed.add_field(name="ID Kênh", value=f"`{channel_id}`")
-        # Hiển thị reaction count nếu có (dù lỗi)
-        reaction_count = detail.get('reaction_count')
-        if reaction_count is not None:
-            error_embed.add_field(name=f"{e('reaction')} Biểu cảm (Trước lỗi)", value=f"{reaction_count:,}", inline=True)
-        return error_embed
-
-    # --- Tạo Embed cho kênh đã quét (có thể có lỗi phụ) ---
-    embed_color = discord.Color.green() if channel_msg_count > 0 else discord.Color.light_grey()
-    if channel_error: # Lỗi phụ sau khi đã quét được phần nào
-        embed_color = discord.Color.orange()
-
-    # --- Chuẩn bị Description ---
-    desc_lines = [
-        f"**ID:** `{channel_id}` | {e('category')} **Danh mục:** {utils.escape_markdown(detail.get('category', 'N/A'))}",
-        f"**NSFW:** {detail.get('nsfw', 'N/A')}",
-    ]
-    if not is_voice_channel:
-        desc_lines.append(f"**Slowmode:** {detail.get('slowmode', 'N/A')}")
-        # Giới hạn độ dài topic hiển thị
-        topic_str = utils.escape_markdown(detail.get('topic', 'Không có'))
-        if len(topic_str) > 200: topic_str = topic_str[:200] + "..."
-        desc_lines.append(f"**Chủ đề:** {topic_str}")
-
-    # Thông tin về luồng (nếu có)
-    threads_data = detail.get("threads_data", [])
-    if not is_voice_channel:
-        scanned_thread_count = len([t for t in threads_data if not t.get("error")])
-        scanned_thread_msg_count = sum(t.get("message_count", 0) for t in threads_data if not t.get("error"))
-        # Tổng reaction từ các luồng đã quét thành công
-        scanned_thread_reaction_count = sum(t.get("reaction_count", 0) for t in threads_data if not t.get("error") and t.get("reaction_count") is not None)
-        reaction_thread_str = f" ({e('reaction')} {scanned_thread_reaction_count:,})" if scanned_thread_reaction_count > 0 else ""
-        skipped_thread_count = len([t for t in threads_data if t.get("error")])
-
-        thread_count_str = f"{e('thread')} **Luồng đã quét:** {scanned_thread_count} ({scanned_thread_msg_count:,} tin nhắn{reaction_thread_str})"
-        if skipped_thread_count > 0:
-            thread_count_str += f" ({skipped_thread_count} lỗi/bỏ qua)"
-        desc_lines.append(thread_count_str)
-    else:
-        desc_lines.append(f"{e('thread')} **Luồng:** N/A (Kênh Voice)")
-
-    channel_embed = discord.Embed(
-        title=f"{channel_type_emoji} Kênh {channel_type_name}: #{utils.escape_markdown(channel_name)}",
-        description="\n".join(line for line in desc_lines if line).strip(), # Bỏ dòng trống
-        color=embed_color,
-        timestamp=detail.get('created_at') # Hiển thị thời gian tạo kênh
+    # --- Top Kênh Text ---
+    top_text_channels = sorted(
+        [d for d in channel_details if d.get("processed") and d["type"] == str(discord.ChannelType.text)],
+        key=lambda d: d.get("message_count", 0),
+        reverse=True
     )
+    top_text_lines = []
+    for rank, detail in enumerate(top_text_channels[:5], 1):
+        channel = guild.get_channel(detail['id'])
+        mention = channel.mention if channel else f"`#{utils.escape_markdown(detail['name'])}`"
+        top_text_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
 
-    # --- Thêm Fields ---
-    channel_embed.add_field(name=f"{e('calendar')} Ngày tạo", value=utils.format_discord_time(detail.get('created_at')), inline=True)
+    # --- Top Kênh Voice ---
+    # Cần dữ liệu voice states lúc quét để biết kênh nào đông - TẠM THỜI CHƯA CÓ
+    # Thay vào đó, có thể hiển thị các kênh voice được tạo gần đây hoặc kênh có tên hấp dẫn?
+    # Hoặc chỉ hiển thị top kênh text
+    top_voice_lines = ["*Cần cập nhật logic để lấy top kênh voice đông*"] # Placeholder
+    # Ví dụ lấy kênh voice tĩnh được tạo gần đây nhất:
+    # sorted_voice_static = sorted(voice_channel_static_data, key=lambda vc: vc.get('created_at') or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc), reverse=True)
+    # for rank, vc_data in enumerate(sorted_voice_static[:5], 1):
+    #      vc = guild.get_channel(vc_data['id'])
+    #      mention = vc.mention if vc else f"`{utils.escape_markdown(vc_data['name'])}`"
+    #      created_str = utils.format_discord_time(vc_data.get('created_at'), 'R')
+    #      top_voice_lines.append(f"`#{rank}`. {mention} (Tạo: {created_str})")
 
-    msg_field_name = f"{e('stats')} Tin nhắn ({channel_type_name})"
-    channel_embed.add_field(name=msg_field_name, value=f"{channel_msg_count:,}", inline=True)
+    # --- Giờ Vàng ---
+    # Cần phân tích timestamp tin nhắn - TẠM THỜI CHƯA CÓ
+    golden_hour_str = "*Cần cập nhật logic để xác định giờ vàng*" # Placeholder
 
-    scan_duration = detail.get('duration', datetime.timedelta(0))
-    channel_embed.add_field(name=f"{e('clock')} TG Quét", value=utils.format_timedelta(scan_duration), inline=True)
-
-    channel_react_count = detail.get('reaction_count')
-    if channel_react_count is not None:
-        react_field_name = f"{e('reaction')} Biểu cảm ({channel_type_name})"
-        channel_embed.add_field(name=react_field_name, value=f"{channel_react_count:,}", inline=True)
-    else:
-        # Thêm field trống để giữ layout 3 cột
-        channel_embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-    top_chatter = detail.get('top_chatter', "Không có")
-    top_chatter_roles = detail.get('top_chatter_roles', "N/A")
-    channel_embed.add_field(name=f"{e('crown')} Top Chatter (Kênh)", value=top_chatter, inline=True)
-    # Giới hạn độ dài role của top chatter
-    if len(top_chatter_roles) > 1000: top_chatter_roles = top_chatter_roles[:1000] + "..."
-    channel_embed.add_field(name=f"{e('role')} Roles Top Chatter", value=top_chatter_roles, inline=True)
-
-    # Log tin nhắn đầu tiên
-    first_msgs_log = detail.get('first_messages_log', ["`[N/A]`"])
-    first_msgs_log_content = "\n".join(first_msgs_log)
-    # Giới hạn độ dài field log
-    if len(first_msgs_log_content) > 1000:
-        first_msgs_log_content = first_msgs_log_content[:1000] + "\n`[...]` (quá dài)"
-    elif not first_msgs_log_content.strip():
-        first_msgs_log_content = "`[Không có hoặc lỗi]`"
-    channel_embed.add_field(
-        name=f"📝 Log ~{FIRST_MESSAGES_LIMIT} Tin nhắn đầu tiên",
-        value=first_msgs_log_content,
+    # --- Tạo Embed ---
+    embed = discord.Embed(
+        title=f"💬 Hoạt động Kênh & Giờ Vàng 🌙",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="🔥 Top Kênh Text \"Nóng\"",
+        value="\n".join(top_text_lines) if top_text_lines else "Không có dữ liệu.",
+        inline=False
+    )
+    embed.add_field(
+        name="🎤 Top Kênh Voice \"Đông Vui\"",
+        value="\n".join(top_voice_lines), # Hiện tại là placeholder
+        inline=False
+    )
+    embed.add_field(
+        name="☀️ \"Giờ Vàng\" của Server",
+        value=golden_hour_str, # Hiện tại là placeholder
         inline=False
     )
 
-    # Hiển thị lỗi phụ (nếu có)
-    if channel_error and processed:
-        error_str = utils.escape_markdown(str(channel_error))
-        if len(error_str) > 1000: error_str = error_str[:1000] + "..."
-        channel_embed.add_field(
-            name=f"{e('warning')} Lưu ý lỗi phụ",
-            value=f"```\n{error_str}\n```",
-            inline=False
-        )
+    if not top_text_lines: # Nếu không có kênh text nào thì trả về None
+        return None
 
-    return channel_embed
+    return embed
 
-
-async def create_voice_channel_embeds(
-    voice_channel_data: List[Dict[str, Any]], # Dữ liệu kênh voice tĩnh
-    bot: discord.Client
-) -> List[discord.Embed]:
-    """Tạo embeds hiển thị thông tin cấu hình tĩnh của các kênh Voice/Stage."""
-    embeds = []
-    e = lambda name: utils.get_emoji(name, bot)
-    if not voice_channel_data:
-        return embeds # Trả về list rỗng nếu không có dữ liệu
-
-    num_vc_embeds = math.ceil(len(voice_channel_data) / VOICE_CHANNELS_PER_EMBED)
-
-    for i in range(num_vc_embeds):
-        start_index = i * VOICE_CHANNELS_PER_EMBED
-        end_index = start_index + VOICE_CHANNELS_PER_EMBED
-        vc_batch = voice_channel_data[start_index:end_index]
-
-        vc_embed = discord.Embed(
-            title=f"{e('voice_channel')}{e('stage')} Thông tin Kênh Voice/Stage (Tĩnh - Phần {i + 1}/{num_vc_embeds})",
-            description=f"{e('info')} *Thông tin cấu hình kênh. Lịch sử chat (nếu có) được quét riêng.*",
-            color=discord.Color.blue()
-        )
-
-        vc_list_lines = []
-        for vc in vc_batch:
-            channel_type_str = vc.get('type', 'unknown')
-            type_emoji = utils.get_channel_type_emoji(channel_type_str, bot)
-            # Hiển thị giới hạn user
-            user_limit_str = str(vc['user_limit']) if isinstance(vc['user_limit'], int) and vc['user_limit'] > 0 else vc.get('user_limit', 'N/A')
-
-            # Dòng chính: Tên và ID
-            line1 = f"**{type_emoji} #{utils.escape_markdown(vc['name'])}** (`{vc['id']}`)"
-            # Dòng phụ 1: Category, Limit, Bitrate
-            line2 = f"  └ {e('category')} {utils.escape_markdown(vc['category'])} | {e('members')} Limit: {user_limit_str} | {e('stats')} Bitrate: {vc['bitrate']}"
-            # Dòng phụ 2: Ngày tạo
-            line3 = f"  └ {e('calendar')} Tạo: {utils.format_discord_time(vc.get('created_at'), 'd')}"
-
-            vc_list_lines.extend([line1, line2, line3])
-
-        # Thêm vào description, giới hạn độ dài
-        current_desc = vc_embed.description + "\n\n"
-        new_content = "\n".join(vc_list_lines) if vc_list_lines else "Không có dữ liệu."
-
-        if len(current_desc) + len(new_content) > 4000:
-             remaining_space = 4000 - len(current_desc) - 20 # Trừ đi khoảng trống cho '...'
-             vc_embed.description = current_desc + new_content[:remaining_space] + "\n... (quá dài)"
-        else:
-             vc_embed.description = current_desc + new_content
-
-        embeds.append(vc_embed)
-
-    return embeds
-
-
-async def create_booster_embeds(
-    boosters: List[discord.Member],
-    bot: discord.Client,
-    scan_end_time: datetime.datetime # Thời điểm quét xong để tính thời gian boost
-) -> List[discord.Embed]:
-    """Tạo embeds danh sách những người đang boost server."""
-    embeds = []
-    e = lambda name: utils.get_emoji(name, bot)
-    boost_emoji = e('boost_animated') or e('boost') # Ưu tiên emoji động
-    if not boosters:
-        return embeds
-
-    # Sắp xếp theo thời gian boost (lâu nhất trước)
-    boosters.sort(key=lambda m: m.premium_since or datetime.datetime.now(datetime.timezone.utc))
-    num_booster_embeds = math.ceil(len(boosters) / BOOSTERS_PER_EMBED)
-
-    for i in range(num_booster_embeds):
-        start_index = i * BOOSTERS_PER_EMBED
-        end_index = start_index + BOOSTERS_PER_EMBED
-        booster_batch = boosters[start_index:end_index]
-
-        booster_embed = discord.Embed(
-            title=f"{boost_emoji} Server Boosters (Phần {i + 1}/{num_booster_embeds})",
-            color=discord.Color(0xf47fff) # Màu hồng boost
-        )
-
-        booster_list_lines = []
-        for member in booster_batch:
-            boost_duration_str = "N/A"
-            if member.premium_since:
-                try:
-                    # Đảm bảo cả hai thời điểm đều có timezone (UTC)
-                    scan_end_time_aware = scan_end_time if scan_end_time.tzinfo else scan_end_time.replace(tzinfo=datetime.timezone.utc)
-                    premium_since_aware = member.premium_since if member.premium_since.tzinfo else member.premium_since.replace(tzinfo=datetime.timezone.utc)
-                    if scan_end_time_aware >= premium_since_aware:
-                        boost_duration = scan_end_time_aware - premium_since_aware
-                        boost_duration_str = utils.format_timedelta(boost_duration)
-                    else:
-                        boost_duration_str = "Lỗi TG (Tương lai?)"
-                except Exception as td_err:
-                    log.warning(f"Lỗi tính thời gian boost cho {member.id}: {td_err}")
-                    boost_duration_str = "Lỗi TG"
-
-            user_display = f" (`{utils.escape_markdown(member.display_name)}`)"
-            line1 = f"{member.mention}{user_display}"
-            line2 = f" └ {e('calendar')} Boost từ: {utils.format_discord_time(member.premium_since, 'D')} ({boost_duration_str})"
-            booster_list_lines.extend([line1, line2])
-
-        # Thêm vào description, giới hạn độ dài
-        new_content = "\n".join(booster_list_lines) if booster_list_lines else "Không có dữ liệu."
-        if len(new_content) > 4000:
-            booster_embed.description = new_content[:4000] + "\n... (quá dài)"
-        else:
-             booster_embed.description = new_content
-
-        embeds.append(booster_embed)
-    return embeds
-
-
-async def create_role_embeds(
-    all_roles: List[discord.Role], # Danh sách roles đã sắp xếp
-    bot: discord.Client
-) -> List[discord.Embed]:
-    """Tạo embeds danh sách các role của server."""
-    embeds = []
-    e = lambda name: utils.get_emoji(name, bot)
-    if not all_roles:
-        return embeds
-
-    num_role_embeds = math.ceil(len(all_roles) / ROLES_PER_EMBED)
-
-    for i in range(num_role_embeds):
-        start_index = i * ROLES_PER_EMBED
-        end_index = start_index + ROLES_PER_EMBED
-        role_batch = all_roles[start_index:end_index]
-
-        role_embed = discord.Embed(
-            title=f"{e('role')} Roles (Phần {i + 1}/{num_role_embeds})",
-            description="*Sắp xếp theo vị trí từ cao xuống thấp.*",
-            color=discord.Color.gold()
-        )
-
-        role_list_lines = []
-        for role in role_batch:
-            color_str = f" (`{role.color}`)" if str(role.color) != "#000000" else "" # Chỉ hiện màu nếu khác màu đen mặc định
-            member_count = len(role.members) # Lấy số member từ cache
-            perm_value = role.permissions.value
-            # Hiển thị giá trị permissions nếu khác 0
-            perm_str = f" | Perms: `{perm_value}`" if perm_value > 0 else ""
-            # Các thông tin khác (có thể thêm nếu cần)
-            hoist_str = " [Hoisted]" if role.hoist else ""
-            mention_str = " [Mentionable]" if role.mentionable else ""
-
-            role_line = f"{role.mention}{color_str} - ID: `{role.id}` ({e('members')} {member_count}){perm_str}{hoist_str}{mention_str}"
-            role_list_lines.append(role_line)
-
-        # Thêm vào description, giới hạn độ dài
-        new_content = "\n".join(role_list_lines) if role_list_lines else "Không có dữ liệu."
-        current_desc = role_embed.description + "\n\n"
-        if len(current_desc) + len(new_content) > 4000:
-            remaining = 4000 - len(current_desc) - 20
-            role_embed.description = current_desc + new_content[:remaining] + "\n... (quá dài)"
-        else:
-            role_embed.description = current_desc + new_content
-
-        embeds.append(role_embed)
-    return embeds
 
 # --- END OF FILE reporting/embeds_guild.py ---

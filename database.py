@@ -2,14 +2,14 @@
 import asyncpg
 import os
 import datetime
-import json # Để xử lý JSONB
+import json 
 from typing import Optional, Dict, Any, List, Union
 import logging
-import discord # Cần cho type hint AuditLogEntry
-import discord.enums # Đảm bảo import này
+import discord 
+import discord.enums
 import asyncio
 
-# Không cần basicConfig vì logging sẽ được cấu hình ở core/setup.py
+
 log = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -324,7 +324,6 @@ async def get_audit_logs_for_report(
         params.append(time_after)
 
     if action_filter:
-        # Chuyển đổi Enum thành tên (string) nếu cần
         action_names = []
         for action in action_filter:
             if isinstance(action, discord.AuditLogAction):
@@ -340,7 +339,6 @@ async def get_audit_logs_for_report(
                 conditions.append(f"action_type = ${param_count}")
                 params.append(action_names[0])
             elif len(action_names) > 1:
-                # Dùng ARRAY[...] và ANY(...) cho nhiều giá trị
                 placeholders = ', '.join(f'${i + param_count + 1}' for i in range(len(action_names)))
                 conditions.append(f"action_type = ANY(ARRAY[{placeholders}])")
                 params.extend(action_names) # Truyền list các tên action (string)

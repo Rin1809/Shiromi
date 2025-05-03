@@ -5,12 +5,12 @@ import discord
 from discord.ext import commands
 from rich.logging import RichHandler
 
-import config # Cần import config để đọc cài đặt
-import discord_logging # Cần import để lấy handler
+import config
+import discord_logging
 
 log = logging.getLogger(__name__)
 
-MIN_PYTHON = (3, 8)
+MIN_PYTHON = (3, 8) 
 
 def check_python_version():
     """Kiểm tra phiên bản Python."""
@@ -20,7 +20,7 @@ def check_python_version():
         sys.exit(1)
 
 def create_intents() -> discord.Intents:
-    """Tạo và cấu hình Intents cho bot."""
+
     log.debug("Đang tạo Intents...")
     intents = discord.Intents.default()
 
@@ -43,7 +43,6 @@ def create_intents() -> discord.Intents:
 
     # Kiểm tra các Intents quan trọng
     if not all([intents.guilds, intents.members, intents.message_content]):
-         # Dùng print vì log có thể chưa cấu hình xong
          print("[CRITICAL LỖI] Thiếu các Privileged Intents quan trọng (Guilds, Members, Message Content)! Bot không thể hoạt động đúng.")
          sys.exit(1)
     if config.ENABLE_REACTION_SCAN and not intents.reactions:
@@ -60,9 +59,8 @@ def create_intents() -> discord.Intents:
     return intents
 
 def configure_logging():
-    """Cấu hình hệ thống logging cho toàn bộ ứng dụng."""
     log.info("Đang cấu hình logging...")
-    check_python_version() # Kiểm tra Python trước khi làm gì khác
+    check_python_version()
 
     # ---- Handlers ----
     # 1. Rich Handler cho Console (log đẹp)
@@ -72,10 +70,11 @@ def configure_logging():
         show_path=False, # Không hiển thị đường dẫn file cho gọn
         log_time_format="[%H:%M:%S]"
     )
-    rich_handler.setLevel(logging.INFO) # Chỉ hiện INFO trở lên trên console
+
+    rich_handler.setLevel(logging.DEBUG) # <<< QUAN TRỌNG: Đặt DEBUG thay vì INFO
+    # ----------------------------------
 
     # 2. Discord Queue Handler (đưa log vào queue để gửi lên Discord)
-    # Handler này lấy từ module discord_logging
     discord_queue_handler = discord_logging.DiscordLogHandler()
     discord_queue_handler.setLevel(logging.DEBUG) # Gửi cả DEBUG log lên Discord
 
@@ -102,11 +101,9 @@ def configure_logging():
 
     # Thông báo cấu hình hoàn tất
     log.info("[bold green]Cấu hình logging hoàn tất.[/]")
-    # Log ví dụ các cấp độ
-    log.debug("Đây là log DEBUG.")
-    log.info("Đây là log INFO.")
-    log.warning("Đây là log WARNING.")
-    log.error("Đây là log ERROR.")
-    # log.critical("Đây là log CRITICAL.") # Tránh log critical không cần thiết
-
+    # Log ví dụ các cấp độ (sẽ hiển thị trên console nếu rich_handler là DEBUG)
+    log.debug("Đây là log DEBUG (kiểm tra).")
+    log.info("Đây là log INFO (kiểm tra).")
+    log.warning("Đây là log WARNING (kiểm tra).")
+    log.error("Đây là log ERROR (kiểm tra).")
 # --- END OF FILE bot_core/setup.py ---

@@ -3,12 +3,33 @@ import os
 import sys
 import logging
 from dotenv import load_dotenv
-import discord # Cần cho AuditLogAction
+import discord
+from typing import List, Optional, Set, Tuple 
 
 log = logging.getLogger(__name__)
 
 # --- Tải biến môi trường ---
 load_dotenv()
+
+# --- Helper Function ---
+def _parse_id_list(env_var_name: str) -> Set[int]:
+    """Phân tích chuỗi ID cách nhau bởi dấu phẩy từ biến môi trường thành set các integer."""
+    id_str = os.getenv(env_var_name)
+    if not id_str:
+        return set()
+    try:
+        return {int(item.strip()) for item in id_str.split(',') if item.strip().isdigit()}
+    except ValueError:
+        log.error(f"Lỗi phân tích danh sách ID trong biến môi trường '{env_var_name}'. Vui lòng kiểm tra định dạng (chỉ chứa số, cách nhau bởi dấu phẩy).")
+        return set()
+
+def _parse_unicode_list(env_var_name: str) -> Set[str]:
+    """Phân tích chuỗi unicode emojis cách nhau bởi dấu phẩy."""
+    emoji_str = os.getenv(env_var_name)
+    if not emoji_str:
+        return set()
+    return {item.strip() for item in emoji_str.split(',') if item.strip()}
+
 
 # --- Lấy các giá trị cấu hình ---
 BOT_TOKEN = os.getenv("DISCORD_TOKEN", "YOUR_BOT_TOKEN")
@@ -23,39 +44,39 @@ FINAL_STICKER_ID = int(FINAL_STICKER_ID_STR) if FINAL_STICKER_ID_STR and FINAL_S
 BOT_NAME = os.getenv("BOT_NAME", "Shiromi")
 ENABLE_REACTION_SCAN = os.getenv("ENABLE_REACTION_SCAN", "False").lower() == "true"
 
+# --- Deep Scan Enhancement Configs ---
+TRACKED_ROLE_GRANT_IDS: Set[int] = _parse_id_list("TRACKED_ROLE_GRANT_IDS")
+log.info(f"IDs Role Grant được theo dõi: {TRACKED_ROLE_GRANT_IDS if TRACKED_ROLE_GRANT_IDS else 'Không có'}")
+
+DM_REPORT_RECIPIENT_ROLE_ID_STR = os.getenv("DM_REPORT_RECIPIENT_ROLE_ID")
+DM_REPORT_RECIPIENT_ROLE_ID: Optional[int] = None
+if DM_REPORT_RECIPIENT_ROLE_ID_STR and DM_REPORT_RECIPIENT_ROLE_ID_STR.isdigit():
+    DM_REPORT_RECIPIENT_ROLE_ID = int(DM_REPORT_RECIPIENT_ROLE_ID_STR)
+    log.info(f"ID Role nhận DM báo cáo: {DM_REPORT_RECIPIENT_ROLE_ID}")
+else:
+    log.info("Không cấu hình Role nhận DM báo cáo.")
+
+BOOSTER_THANKYOU_ROLE_IDS: Set[int] = _parse_id_list("BOOSTER_THANKYOU_ROLE_IDS")
+log.info(f"IDs Role được cảm ơn trong DM: {BOOSTER_THANKYOU_ROLE_IDS if BOOSTER_THANKYOU_ROLE_IDS else 'Không có'}")
+
+REACTION_UNICODE_EXCEPTIONS: Set[str] = _parse_unicode_list("REACTION_UNICODE_EXCEPTIONS")
+log.info(f"Unicode Reactions được phép trong BXH: {REACTION_UNICODE_EXCEPTIONS if REACTION_UNICODE_EXCEPTIONS else 'Không có (chỉ custom emoji server)'}")
+
+ADMIN_ROLE_IDS_FILTER: Set[int] = _parse_id_list("ADMIN_ROLE_IDS_FILTER")
+log.info(f"IDs Role Admin bổ sung cần lọc khỏi BXH: {ADMIN_ROLE_IDS_FILTER if ADMIN_ROLE_IDS_FILTER else 'Không có'}")
+
+
 # --- Cấu hình Audit Log Actions ---
+# (Giữ nguyên phần này)
 AUDIT_LOG_ACTIONS_TO_TRACK_STR = os.getenv("AUDIT_LOG_ACTIONS_TO_TRACK")
 AUDIT_LOG_ACTIONS_TO_TRACK = None
-
-if AUDIT_LOG_ACTIONS_TO_TRACK_STR:
-    action_names = [name.strip().lower() for name in AUDIT_LOG_ACTIONS_TO_TRACK_STR.split(',') if name.strip()]
-    AUDIT_LOG_ACTIONS_TO_TRACK = []
-    invalid_actions = []
-    for name in action_names:
-        try:
-            action_enum = getattr(discord.AuditLogAction, name)
-            AUDIT_LOG_ACTIONS_TO_TRACK.append(action_enum)
-        except AttributeError:
-            invalid_actions.append(name)
-    if invalid_actions:
-        log.warning(f"Loại action audit log không hợp lệ trong .env: {', '.join(invalid_actions)}")
-    if not AUDIT_LOG_ACTIONS_TO_TRACK:
-        log.warning("Không có action audit log hợp lệ nào được cấu hình trong .env, sử dụng default.")
-        AUDIT_LOG_ACTIONS_TO_TRACK = None # Reset để dùng default bên dưới
-else:
-    log.info("Không có cấu hình AUDIT_LOG_ACTIONS_TO_TRACK trong .env, sử dụng default.")
-
-# Default actions nếu không có hoặc không hợp lệ trong .env
 if AUDIT_LOG_ACTIONS_TO_TRACK is None:
     AUDIT_LOG_ACTIONS_TO_TRACK = [
+
         discord.AuditLogAction.kick, discord.AuditLogAction.ban, discord.AuditLogAction.unban,
         discord.AuditLogAction.member_role_update, discord.AuditLogAction.member_update,
-        discord.AuditLogAction.role_create, discord.AuditLogAction.role_delete, discord.AuditLogAction.role_update,
-        discord.AuditLogAction.channel_create, discord.AuditLogAction.channel_delete, discord.AuditLogAction.channel_update,
-        discord.AuditLogAction.invite_create, discord.AuditLogAction.invite_delete, discord.AuditLogAction.invite_update,
-        discord.AuditLogAction.webhook_create, discord.AuditLogAction.webhook_delete, discord.AuditLogAction.webhook_update,
-        discord.AuditLogAction.message_delete, discord.AuditLogAction.message_bulk_delete,
-        discord.AuditLogAction.thread_create, discord.AuditLogAction.thread_delete, discord.AuditLogAction.thread_update,
+        discord.AuditLogAction.message_delete, # Có thể hữu ích để xem mod xóa gì
+        discord.AuditLogAction.thread_create, # Để đếm user tạo thread
         discord.AuditLogAction.member_move, discord.AuditLogAction.member_disconnect,
     ]
 log.info(f"Audit log actions được theo dõi: {[a.name for a in AUDIT_LOG_ACTIONS_TO_TRACK]}")
@@ -69,12 +90,10 @@ def check_critical_config():
         critical_missing.append("DISCORD_TOKEN")
     if not DATABASE_URL:
         critical_missing.append("DATABASE_URL")
-    # Thêm kiểm tra ADMIN_USER_ID nếu nó là bắt buộc
-    # if not ADMIN_USER_ID:
-    #     critical_missing.append("ADMIN_USER_ID")
+    if not ADMIN_USER_ID: # Chủ bot vẫn là critical
+         critical_missing.append("ADMIN_USER_ID")
 
     if critical_missing:
-        # Dùng print ở đây vì log có thể chưa được cấu hình khi hàm này chạy
         print("[LỖI CẤU HÌNH NGHIÊM TRỌNG] Thiếu các biến môi trường sau:")
         for missing in critical_missing:
             print(f"- {missing}")
