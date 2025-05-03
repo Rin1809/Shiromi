@@ -200,7 +200,7 @@ class ServerDeepScan(commands.Cog):
 
     # --- LỆNH !test (GỬI DM CHO ADMIN) ---
     @commands.command(
-        name='test',
+        name='testexp',
         aliases=['sds', 'serverdeepscan'],
         help=(
              '**(ADMIN TEST)** Thực hiện quét sâu và gửi báo cáo DM **CHỈ CHO ADMIN BOT**.\n'
