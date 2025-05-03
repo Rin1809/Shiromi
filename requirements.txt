@@ -5,3 +5,6 @@ google-generativeai
 rich
 PyNaCl
 psycopg2-binary
+markdown
+discord.py[voice]
+uvloop
