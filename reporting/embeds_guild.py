@@ -4,15 +4,16 @@ import datetime
 import math
 import logging
 import collections
+import time # <<< ADDED IMPORT
 from typing import List, Dict, Any, Optional, Union
 from discord.ext import commands
-from collections import Counter
+from collections import Counter, defaultdict
 import asyncio
 
-
+# Relative import (giữ nguyên)
 try:
     from .. import utils
-    from .. import config 
+    from .. import config
 except ImportError:
     import utils
     import config
@@ -23,10 +24,12 @@ log = logging.getLogger(__name__)
 VOICE_CHANNELS_PER_EMBED = 20
 FIRST_MESSAGES_LIMIT = 10
 FIRST_MESSAGES_CONTENT_PREVIEW = 100
-
+GOLDEN_HOUR_INTERVAL = 3
+GOLDEN_HOUR_TOP_CHANNELS = 5
 
 # --- Embed Creation Functions ---
 
+# create_summary_embed (Không thay đổi, giữ nguyên phiên bản trước)
 async def create_summary_embed(
     server: discord.Guild,
     bot: discord.Client,
@@ -43,7 +46,7 @@ async def create_summary_embed(
     start_time: datetime.datetime,
     scan_data: Dict[str, Any],
     ctx: Optional[commands.Context] = None,
-    overall_total_reaction_count: Optional[int] = None 
+    overall_total_reaction_count: Optional[int] = None
 ) -> discord.Embed:
     """Tạo embed tóm tắt chính thông tin server và kết quả quét (đã nâng cấp)."""
     e = lambda name: utils.get_emoji(name, bot)
@@ -53,8 +56,13 @@ async def create_summary_embed(
     mfa_level = "Yêu cầu (Cho Mod)" if server.mfa_level >= discord.MFALevel.require_2fa else "Không yêu cầu"
     notifications = "Chỉ @mention" if server.default_notifications == discord.NotificationLevel.only_mentions else "Tất cả tin nhắn"
 
-    member_count = len([m for m in server.members if not m.bot])
-    bot_count = len([m for m in server.members if m.bot])
+    # Lấy số liệu member từ cache ban đầu trong scan_data nếu có, nếu không thì từ server object
+    member_count_real = scan_data.get('server_info', {}).get('member_count_real')
+    bot_count_scan = scan_data.get('server_info', {}).get('bot_count')
+    if member_count_real is None or bot_count_scan is None:
+        log.warning("Thiếu server_info trong scan_data, lấy member count từ server object (có thể không chính xác lúc bắt đầu quét).")
+        member_count_real = len([m for m in server.members if not m.bot])
+        bot_count_scan = len([m for m in server.members if m.bot])
 
     # --- NÂNG CẤP: Lấy top custom emoji/sticker server ---
     top_custom_emojis_str = "N/A"
@@ -62,32 +70,39 @@ async def create_summary_embed(
 
     # Lấy top custom emoji reactions (đã lọc)
     filtered_reaction_counts = scan_data.get("filtered_reaction_emoji_counts", Counter())
-    custom_emoji_reactions = {eid: count for eid, count in filtered_reaction_counts.items() if isinstance(eid, int)} # Chỉ lấy ID emoji
+    custom_emoji_reactions = {eid: count for eid, count in filtered_reaction_counts.items() if isinstance(eid, int)}
     if custom_emoji_reactions:
         sorted_custom_reactions = sorted(custom_emoji_reactions.items(), key=lambda item: item[1], reverse=True)
         top_emojis = []
-        for emoji_id, count in sorted_custom_reactions[:5]: # Lấy top 5
+        for emoji_id, count in sorted_custom_reactions[:5]:
             emoji_obj = bot.get_emoji(emoji_id)
+            if not emoji_obj:
+                emoji_obj = scan_data.get("server_emojis_cache", {}).get(emoji_id)
             if emoji_obj:
                 top_emojis.append(f"{str(emoji_obj)} ({count:,})")
         if top_emojis:
             top_custom_emojis_str = " ".join(top_emojis)
+        elif sorted_custom_reactions:
+            top_custom_emojis_str = f"Top ID: {sorted_custom_reactions[0][0]} ({sorted_custom_reactions[0][1]:,}), ..."
 
     # Lấy top custom stickers server (đã đếm trong scan_channels)
     custom_sticker_counts = scan_data.get("overall_custom_sticker_counts", Counter())
     if custom_sticker_counts:
-        sorted_custom_stickers = custom_sticker_counts.most_common(5) # Lấy top 5
+        sorted_custom_stickers = custom_sticker_counts.most_common(5)
         top_stickers = []
-        # Fetch tên sticker (có thể chậm nếu nhiều) - Cân nhắc chỉ hiển thị ID nếu cần tối ưu
-        sticker_cache = {}
-        async def fetch_sticker_name(sid):
-             if sid not in sticker_cache:
-                 try: sticker_cache[sid] = await bot.fetch_sticker(sid)
-                 except: sticker_cache[sid] = None
-             return sticker_cache[sid]
 
-        fetch_tasks = [fetch_sticker_name(sid) for sid, count in sorted_custom_stickers]
-        await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        sticker_cache = scan_data.get("server_stickers_cache_objects")
+        if sticker_cache is None:
+            sticker_cache = {}
+            log.debug("Summary Embed: Fetching sticker objects...")
+            async def fetch_sticker_name(sid):
+                if sid not in sticker_cache:
+                    try: sticker_cache[sid] = await bot.fetch_sticker(sid)
+                    except Exception: sticker_cache[sid] = None
+                return sticker_cache[sid]
+            fetch_tasks = [fetch_sticker_name(sid) for sid, count in sorted_custom_stickers if isinstance(sid, int)]
+            await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            log.debug("Summary Embed: Fetch sticker objects complete.")
 
         for sticker_id, count in sorted_custom_stickers:
              sticker_obj = sticker_cache.get(sticker_id)
@@ -95,6 +110,8 @@ async def create_summary_embed(
              top_stickers.append(f"{name} ({count:,})")
         if top_stickers:
              top_custom_stickers_str = ", ".join(top_stickers)
+        elif sorted_custom_stickers:
+            top_custom_stickers_str = f"Top ID: {sorted_custom_stickers[0][0]} ({sorted_custom_stickers[0][1]:,}), ..."
 
     # Chuỗi tóm tắt kết quả quét (sử dụng reaction đã lọc)
     filtered_reaction_count = sum(filtered_reaction_counts.values())
@@ -113,7 +130,7 @@ async def create_summary_embed(
         title=f"{e('star')} Tổng Quan Server: {server.name} {e('star')}",
         description=scan_summary,
         color=discord.Color.purple(),
-        timestamp=start_time + overall_duration
+        timestamp=start_time + overall_duration # Thời gian kết thúc quét
     )
     if server.icon:
         summary_embed.set_thumbnail(url=server.icon.url)
@@ -129,8 +146,8 @@ async def create_summary_embed(
     summary_embed.add_field(name=f"{e('boost')} Boost", value=f"Cấp {server.premium_tier} ({server.premium_subscription_count})", inline=True)
 
     summary_embed.add_field(name=f"{e('members')} Tổng Members", value=f"{server.member_count:,} (Cache)", inline=True)
-    summary_embed.add_field(name="🧑‍🤝‍🧑 Users", value=f"{member_count:,}", inline=True)
-    summary_embed.add_field(name=f"{e('bot_tag')} Bots", value=f"{bot_count:,}", inline=True)
+    summary_embed.add_field(name="🧑‍🤝‍🧑 Users", value=f"{member_count_real:,}", inline=True)
+    summary_embed.add_field(name=f"{e('bot_tag')} Bots", value=f"{bot_count_scan:,}", inline=True)
 
     # Thống kê kênh (giữ nguyên)
     channel_stats_lines = [
@@ -151,8 +168,8 @@ async def create_summary_embed(
     summary_embed.add_field(
         name=f"{e('star')} Điểm Nhấn Server",
         value=(
-            f"{utils.get_emoji('mention', bot)} **Custom Emojis:** {len(server.emojis):,} (Top: {top_custom_emojis_str})\n"
-            f"{e('sticker')} **Custom Stickers:** {len(server.stickers):,} (Top: {top_custom_stickers_str})\n"
+            f"{utils.get_emoji('mention', bot)} **Custom Emojis:** {len(scan_data.get('server_emojis_cache', {})):,} (Top Reactions: {top_custom_emojis_str})\n"
+            f"{e('sticker')} **Custom Stickers:** {len(scan_data.get('server_sticker_ids_cache', set())):,} (Top Gửi: {top_custom_stickers_str})\n"
             f"{e('role')} **Roles:** {all_roles_count:,}"
         ),
         inline=False
@@ -165,12 +182,12 @@ async def create_summary_embed(
 
     return summary_embed
 
-
-async def create_channel_activity_embed( # Đổi tên hàm cho rõ nghĩa
+# create_channel_activity_embed (Không thay đổi, giữ nguyên phiên bản trước)
+async def create_channel_activity_embed(
     guild: discord.Guild,
     bot: discord.Client,
     channel_details: List[Dict[str, Any]],
-    voice_channel_static_data: List[Dict[str, Any]] # Thêm data kênh voice tĩnh
+    voice_channel_static_data: List[Dict[str, Any]]
 ) -> Optional[discord.Embed]:
     """Tạo embed hiển thị top kênh text/voice hoạt động."""
     e = lambda name: utils.get_emoji(name, bot)
@@ -188,25 +205,23 @@ async def create_channel_activity_embed( # Đổi tên hàm cho rõ nghĩa
         top_text_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
 
     # --- Top Kênh Voice ---
-    # Cần dữ liệu voice states lúc quét để biết kênh nào đông - TẠM THỜI CHƯA CÓ
-    # Thay vào đó, có thể hiển thị các kênh voice được tạo gần đây hoặc kênh có tên hấp dẫn?
-    # Hoặc chỉ hiển thị top kênh text
-    top_voice_lines = ["*Cần cập nhật logic để lấy top kênh voice đông*"] # Placeholder
-    # Ví dụ lấy kênh voice tĩnh được tạo gần đây nhất:
-    # sorted_voice_static = sorted(voice_channel_static_data, key=lambda vc: vc.get('created_at') or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc), reverse=True)
-    # for rank, vc_data in enumerate(sorted_voice_static[:5], 1):
-    #      vc = guild.get_channel(vc_data['id'])
-    #      mention = vc.mention if vc else f"`{utils.escape_markdown(vc_data['name'])}`"
-    #      created_str = utils.format_discord_time(vc_data.get('created_at'), 'R')
-    #      top_voice_lines.append(f"`#{rank}`. {mention} (Tạo: {created_str})")
-
-    # --- Giờ Vàng ---
-    # Cần phân tích timestamp tin nhắn - TẠM THỜI CHƯA CÓ
-    golden_hour_str = "*Cần cập nhật logic để xác định giờ vàng*" # Placeholder
+    top_voice_channels = sorted(
+        [d for d in channel_details if d.get("processed") and d["type"] == str(discord.ChannelType.voice) and d.get("message_count", 0) > 0],
+        key=lambda d: d.get("message_count", 0),
+        reverse=True
+    )
+    top_voice_lines = []
+    if top_voice_channels:
+        for rank, detail in enumerate(top_voice_channels[:5], 1):
+            channel = guild.get_channel(detail['id'])
+            mention = channel.mention if channel else f"`#{utils.escape_markdown(detail['name'])}`"
+            top_voice_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
+    else:
+        top_voice_lines.append("*Không tìm thấy tin nhắn trong kênh voice (hoặc API không hỗ trợ).*")
 
     # --- Tạo Embed ---
     embed = discord.Embed(
-        title=f"💬 Hoạt động Kênh & Giờ Vàng 🌙",
+        title=f"💬 Hoạt động Kênh",
         color=discord.Color.green()
     )
     embed.add_field(
@@ -215,20 +230,135 @@ async def create_channel_activity_embed( # Đổi tên hàm cho rõ nghĩa
         inline=False
     )
     embed.add_field(
-        name="🎤 Top Kênh Voice \"Đông Vui\"",
-        value="\n".join(top_voice_lines), # Hiện tại là placeholder
-        inline=False
-    )
-    embed.add_field(
-        name="☀️ \"Giờ Vàng\" của Server",
-        value=golden_hour_str, # Hiện tại là placeholder
+        name="🎤 Top Kênh Voice \"Nóng\" (Chat Text)",
+        value="\n".join(top_voice_lines),
         inline=False
     )
 
-    if not top_text_lines: # Nếu không có kênh text nào thì trả về None
+    if not top_text_lines and not top_voice_channels:
         return None
 
     return embed
 
+# create_golden_hour_embed (Fix NameError)
+async def create_golden_hour_embed(
+    server_hourly_activity: Counter,
+    channel_hourly_activity: Dict[int, Counter],
+    thread_hourly_activity: Dict[int, Counter],
+    guild: discord.Guild,
+    bot: discord.Client
+) -> Optional[discord.Embed]:
+    """Tạo embed hiển thị khung giờ hoạt động sôi nổi nhất (Giờ Vàng)."""
+    e = lambda name: utils.get_emoji(name, bot)
+    if not server_hourly_activity:
+        return None # Không có dữ liệu giờ
+
+    # <<< FIX: Tính toán timezone offset từ module time >>>
+    try:
+        # Lấy offset của timezone local so với UTC tính bằng giây
+        # time.timezone trả về offset tính bằng giây phía TÂY UTC (nên cần đảo dấu)
+        # Chia cho 3600 để đổi sang giờ
+        local_offset_hours = int(time.timezone / -3600)
+        timezone_str = f"UTC{local_offset_hours:+d}" # Format thành "+H" hoặc "-H"
+    except Exception as tz_err:
+        log.warning(f"Không thể xác định timezone local của bot: {tz_err}. Mặc định về UTC.")
+        timezone_str = "UTC" # Fallback về UTC nếu lỗi
+    # <<< END FIX >>>
+
+    embed = discord.Embed(
+        # <<< FIX: Sử dụng timezone_str đã tính >>>
+        title=f"☀️🌙 \"Giờ Vàng\" của Server ({timezone_str})",
+        # <<< END FIX >>>
+        description="*Khung giờ server và các kênh/luồng có nhiều tin nhắn nhất.*",
+        color=discord.Color.gold()
+    )
+
+    # --- Tính Giờ Vàng Server ---
+    hourly_grouped = defaultdict(int)
+    for hour, count in server_hourly_activity.items():
+        start_hour = (hour // GOLDEN_HOUR_INTERVAL) * GOLDEN_HOUR_INTERVAL
+        hourly_grouped[start_hour] += count
+
+    sorted_server_hours = sorted(hourly_grouped.items(), key=lambda item: item[1], reverse=True)
+
+    server_golden_lines = []
+    for rank, (start_hour, count) in enumerate(sorted_server_hours, 1):
+        # <<< FIX: Tính toán giờ địa phương đúng cách >>>
+        # Tạo datetime UTC giả lập với giờ bắt đầu
+        utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        # Chuyển sang timezone local của bot (nếu xác định được)
+        try:
+            # Lấy timezone object từ offset đã tính
+            local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
+            local_start_dt = utc_start_dt.astimezone(local_tz)
+        except Exception: # Fallback về UTC nếu lỗi timezone
+            local_start_dt = utc_start_dt
+
+        local_end_dt = local_start_dt + datetime.timedelta(hours=GOLDEN_HOUR_INTERVAL)
+        # Format giờ địa phương
+        time_str = f"{local_start_dt.strftime('%H:%M')} - {local_end_dt.strftime('%H:%M')}"
+        # <<< END FIX >>>
+        server_golden_lines.append(f"**`#{rank}`**. **{time_str}**: {count:,} tin")
+        if rank >= 3: # Chỉ hiển thị top 3 khung giờ server
+            break
+
+    embed.add_field(
+        name="🏆 Khung Giờ Vàng Toàn Server",
+        value="\n".join(server_golden_lines) if server_golden_lines else "Không có dữ liệu.",
+        inline=False
+    )
+
+    # --- Tính Giờ Vàng Kênh/Luồng ---
+    location_hourly_activity = defaultdict(Counter)
+    for loc_id, counts in channel_hourly_activity.items(): location_hourly_activity[loc_id].update(counts)
+    for loc_id, counts in thread_hourly_activity.items(): location_hourly_activity[loc_id].update(counts)
+
+    location_golden_hours = {} # {loc_id: (start_hour, count)}
+    for loc_id, hourly_counts in location_hourly_activity.items():
+        if not hourly_counts: continue
+        loc_grouped = defaultdict(int)
+        for hour, count in hourly_counts.items():
+            start_hour = (hour // GOLDEN_HOUR_INTERVAL) * GOLDEN_HOUR_INTERVAL
+            loc_grouped[start_hour] += count
+        if loc_grouped:
+            best_start_hour, max_count = max(loc_grouped.items(), key=lambda item: item[1])
+            location_golden_hours[loc_id] = (best_start_hour, max_count)
+
+    # Sắp xếp kênh/luồng theo số tin nhắn giờ vàng của chúng
+    sorted_locations_by_gold = sorted(location_golden_hours.items(), key=lambda item: item[1][1], reverse=True)
+
+    location_golden_lines = []
+    locations_shown = 0
+    for loc_id, (start_hour, count) in sorted_locations_by_gold:
+        if locations_shown >= GOLDEN_HOUR_TOP_CHANNELS: break # Giới hạn số dòng hiển thị
+
+        location_obj = guild.get_channel_or_thread(loc_id)
+        if not location_obj: continue
+
+        loc_mention = location_obj.mention
+        loc_type_emoji = utils.get_channel_type_emoji(location_obj, bot)
+
+        # <<< FIX: Tính giờ địa phương >>>
+        utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        try:
+            local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
+            local_start_dt = utc_start_dt.astimezone(local_tz)
+        except Exception:
+            local_start_dt = utc_start_dt
+        local_end_dt = local_start_dt + datetime.timedelta(hours=GOLDEN_HOUR_INTERVAL)
+        time_str = f"{local_start_dt.strftime('%H:%M')}-{local_end_dt.strftime('%H:%M')}"
+        # <<< END FIX >>>
+
+        location_golden_lines.append(f"{loc_type_emoji} {loc_mention}: **{time_str}** ({count:,} tin)")
+        locations_shown += 1
+
+    embed.add_field(
+        name=f"🏅 Giờ Vàng Của Top {GOLDEN_HOUR_TOP_CHANNELS} Kênh/Luồng",
+        value="\n".join(location_golden_lines) if location_golden_lines else "Không có dữ liệu.",
+        inline=False
+    )
+
+    return embed
+# <<< END ADDED >>>
 
 # --- END OF FILE reporting/embeds_guild.py ---

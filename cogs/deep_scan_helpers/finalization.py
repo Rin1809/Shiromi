@@ -15,6 +15,7 @@ async def finalize_scan(scan_data: Dict[str, Any]):
     """Gửi tin nhắn tổng kết cuối cùng và đóng các file (nếu có)."""
     ctx: commands.Context = scan_data["ctx"]
     bot: commands.Bot = scan_data["bot"]
+    server: discord.Guild = scan_data["server"] # <<< ADDED: Lấy server object
     e = lambda name: utils.get_emoji(name, bot)
     files_to_send: List[discord.File] = scan_data["files_to_send"]
     scan_errors: List[str] = scan_data["scan_errors"]
@@ -73,13 +74,30 @@ async def finalize_scan(scan_data: Dict[str, Any]):
 
     # --- Lấy Sticker cuối cùng (nếu cấu hình) ---
     final_sticker_to_send: Optional[discord.Sticker] = None
+    can_use_final_sticker = False
     if config.FINAL_STICKER_ID:
         try:
-
-            # Chỉ sử dụng bot.fetch_sticker để lấy sticker
             log.debug(f"Fetching final sticker ID: {config.FINAL_STICKER_ID}")
             final_sticker_to_send = await bot.fetch_sticker(config.FINAL_STICKER_ID)
-            log.debug(f"Fetched sticker: {final_sticker_to_send.name if final_sticker_to_send else 'Not Found'}")
+            if final_sticker_to_send:
+                log.debug(f"Fetched sticker: {final_sticker_to_send.name}")
+                # <<< FIX: Kiểm tra xem bot có thể dùng sticker này không >>>
+                if final_sticker_to_send.available:
+                    # Nếu là sticker server, kiểm tra xem có thuộc server hiện tại không
+                    if isinstance(final_sticker_to_send, discord.GuildSticker):
+                        if final_sticker_to_send.guild_id == server.id:
+                            can_use_final_sticker = True
+                            log.debug("Bot có thể dùng sticker server này.")
+                        else:
+                            log.warning(f"Sticker {final_sticker_to_send.id} thuộc server khác ({final_sticker_to_send.guild_id}), bot không thể dùng.")
+                    else: # Sticker mặc định (ít khả năng fetch được bằng ID)
+                        can_use_final_sticker = True # Giả sử bot dùng được sticker mặc định nếu fetch được
+                else:
+                     log.warning(f"Sticker {final_sticker_to_send.id} không available.")
+                # <<< END FIX >>>
+            else:
+                 log.warning(f"Không tìm thấy sticker ID {config.FINAL_STICKER_ID} sau khi fetch.")
+
         except discord.NotFound:
              log.warning(f"Không tìm thấy sticker ID {config.FINAL_STICKER_ID}.")
              scan_errors.append(f"Không tìm thấy sticker ID {config.FINAL_STICKER_ID}.")
@@ -87,7 +105,7 @@ async def finalize_scan(scan_data: Dict[str, Any]):
              log.warning(f"Lỗi HTTP khi fetch sticker {config.FINAL_STICKER_ID}: {e_sticker_http.status}")
              scan_errors.append(f"Lỗi HTTP lấy sticker ID {config.FINAL_STICKER_ID}.")
         except Exception as e_sticker:
-            log.warning(f"Lỗi không xác định fetch sticker {config.FINAL_STICKER_ID}: {e_sticker}", exc_info=True) # Thêm exc_info
+            log.warning(f"Lỗi không xác định fetch sticker {config.FINAL_STICKER_ID}: {e_sticker}", exc_info=True)
             scan_errors.append(f"Lỗi lấy sticker ID {config.FINAL_STICKER_ID}.")
 
     # --- Gửi tin nhắn cuối cùng và file (nếu có) ---
@@ -100,8 +118,13 @@ async def finalize_scan(scan_data: Dict[str, Any]):
         }
         if files_to_send:
             kwargs_send["files"] = files_to_send # List các discord.File
-        if final_sticker_to_send and isinstance(final_sticker_to_send, discord.Sticker):
+
+        # <<< FIX: Chỉ thêm sticker nếu bot có thể dùng >>>
+        if can_use_final_sticker and final_sticker_to_send:
             kwargs_send["stickers"] = [final_sticker_to_send] # Phải là list
+        elif final_sticker_to_send and not can_use_final_sticker:
+            log.info("Không gửi sticker cuối cùng do bot không có quyền sử dụng.")
+        # <<< END FIX >>>
 
         await ctx.send(**kwargs_send)
         log.info(f"{e('success')} Đã gửi tin nhắn báo cáo cuối cùng.")

@@ -8,10 +8,9 @@ import datetime
 from typing import Dict, Any, List, Union, Optional, Counter as TypingCounter, Set, Tuple
 from collections import Counter, defaultdict
 
-import config 
+import config
 import utils
 import database
-
 
 log = logging.getLogger(__name__)
 
@@ -46,12 +45,12 @@ async def process_additional_data(scan_data: Dict[str, Any]):
     except Exception as booster_err:
         log.error(f"Lỗi khi lấy danh sách boosters: {booster_err}")
         scan_errors.append(f"Lỗi lấy boosters: {booster_err}")
-        scan_data["boosters"] = [] 
+        scan_data["boosters"] = []
 
     # --- Lấy thông tin tĩnh kênh Voice/Stage ---
     await _fetch_static_voice_stage_info(scan_data)
 
-    # --- Fetch Invites, Webhooks, Integrations (cho export, nếu cần) ---c
+    # --- Fetch Invites, Webhooks, Integrations (cho export, nếu cần) ---
     await _fetch_invites_webhooks_integrations(scan_data)
 
     # --- Lấy Top Oldest Members ---
@@ -259,8 +258,8 @@ async def _fetch_top_oldest_members(scan_data: Dict[str, Any]):
     current_members_list: List[discord.Member] = scan_data["current_members_list"]
     oldest_members_data: List[Dict[str, Any]] = []
     # Lấy hằng số từ embeds_user hoặc định nghĩa lại ở đây nếu cần
-    # from reporting.embeds_user import TOP_OLDEST_MEMBERS_LIMIT # Cách 1: Import
-    TOP_OLDEST_MEMBERS_LIMIT = 30 # Cách 2: Định nghĩa lại
+    from reporting.embeds_user import TOP_OLDEST_MEMBERS_LIMIT # Cách 1: Import
+    # TOP_OLDEST_MEMBERS_LIMIT = 30 # Cách 2: Định nghĩa lại
 
     log.info(f"{e('calendar')} Đang xác định thành viên lâu năm nhất...")
     try:
@@ -293,7 +292,9 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
     can_scan_audit_log = scan_data.get("can_scan_audit_log", False)
     tracked_role_ids: Set[int] = config.TRACKED_ROLE_GRANT_IDS
     # Lấy Counter đã khởi tạo đúng cách từ scan_data
-    user_tracked_grants: Counter = scan_data.setdefault('tracked_role_grant_counts', Counter())
+    # <<< FIX: Đảm bảo Counter dùng key tuple (user_id, role_id) >>>
+    user_tracked_grants: Counter = scan_data.setdefault('tracked_role_grant_counts', Counter()) # Counter { (user_id, role_id): count }
+    # <<< END FIX >>>
     user_thread_creation_counts = scan_data.setdefault('user_thread_creation_counts', Counter())
 
     if not can_scan_audit_log:
@@ -311,36 +312,36 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
 
         fetch_limit = 1000
         current_after_id = last_scanned_log_id
-        max_iterations = 20
+        max_iterations = 20 # Giới hạn số lần fetch để tránh treo
         processed_in_this_scan = 0
         newest_id_in_scan = last_scanned_log_id # Khởi tạo bằng ID cũ
         log.info(f"Bắt đầu fetch audit logs sau ID: {current_after_id or 'Ban đầu'}...")
 
         for iteration in range(max_iterations):
             logs_in_batch: List[discord.AuditLogEntry] = []
-            batch_fetch_start_time = time.monotonic() # <<< SỬ DỤNG time.monotonic()
+            batch_fetch_start_time = time.monotonic()
             try:
-    
+                # <<< FIX: Lấy oldest_first=True để xử lý từ cũ đến mới, đảm bảo không bỏ sót >>>
+                # (Lưu ý: Việc này có thể chậm hơn nếu có rất nhiều log mới)
+                # Nếu bạn chắc chắn không cần xử lý log cũ hơn last_scanned_log_id, có thể để oldest_first=False
                 audit_iterator = server.audit_logs(
                     limit=fetch_limit,
                     after=discord.Object(id=current_after_id) if current_after_id else None,
-                    oldest_first=True # Vẫn lấy từ cũ đến mới
+                    oldest_first=True # Lấy từ cũ đến mới để xử lý tuần tự
                 )
-                # ------------------------------------
                 logs_in_batch = [entry async for entry in audit_iterator]
+                # <<< END FIX >>>
 
-                batch_fetch_duration = time.monotonic() - batch_fetch_start_time # <<< SỬ DỤNG time.monotonic()
+                batch_fetch_duration = time.monotonic() - batch_fetch_start_time
                 relevant_logs_in_batch = [
                     entry for entry in logs_in_batch
                     if entry.action in config.AUDIT_LOG_ACTIONS_TO_TRACK
                 ]
                 log.debug(f"  Audit log batch {iteration+1}: Fetched {len(logs_in_batch)} entries, found {len(relevant_logs_in_batch)} relevant action(s) in {batch_fetch_duration:.2f}s.")
                 logs_in_batch = relevant_logs_in_batch # Gán lại list đã lọc
-                # --------------------------------------------------
 
             except discord.Forbidden: log.error(f"  {e('error')} Lỗi quyền khi fetch audit log batch {iteration+1}. Dừng."); scan_errors.append("Lỗi quyền fetch Audit Log."); break
             except discord.HTTPException as audit_http_err: log.error(f"  {e('error')} Lỗi mạng khi fetch audit log batch {iteration+1} (HTTP {audit_http_err.status}): {audit_http_err.text}"); scan_errors.append(f"Lỗi mạng fetch Audit Log ({audit_http_err.status})."); await asyncio.sleep(5); continue
-
             except AttributeError as ae:
                  if "'NoneType' object has no attribute 'history'" in str(ae): # Kiểm tra lỗi cụ thể hơn nếu cần
                       log.error(f"  {e('error')} Lỗi lấy audit log iterator (có thể do lỗi kết nối/quyền?). Dừng fetch batch {iteration+1}.")
@@ -349,27 +350,30 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
                       log.error(f"  {e('error')} Lỗi AttributeError lạ khi fetch audit log batch {iteration+1}: {ae}", exc_info=True)
                       scan_errors.append(f"Lỗi AttributeError lạ fetch Audit Log: {ae}")
                  break
-            # ----------------------------------------------------------
             except Exception as audit_fetch_err: log.error(f"  {e('error')} Lỗi fetch audit log batch {iteration+1}: {audit_fetch_err}", exc_info=True); scan_errors.append(f"Lỗi fetch Audit Log: {audit_fetch_err}"); break
-
 
             if not logs_in_batch: log.info(f"  Không tìm thấy entry audit log mới phù hợp (batch {iteration+1})."); break
 
             db_add_count_batch = 0
-            batch_newest_id_processed = None
+            batch_newest_id_processed = None # ID mới nhất xử lý thành công trong batch này
             for entry in logs_in_batch: # Duyệt qua list đã lọc
                  try:
+                     # <<< FIX: Gọi add_audit_log_entry để lưu vào DB >>>
                      await database.add_audit_log_entry(entry)
+                     # <<< END FIX >>>
                      db_add_count_batch += 1
                      audit_log_entries_added += 1
                      processed_in_this_scan += 1
 
+                     # Cập nhật ID mới nhất đã thấy *trong lần quét này*
                      if newest_id_in_scan is None or entry.id > newest_id_in_scan:
                          newest_id_in_scan = entry.id
-                     # -------------------------------------------------------------
-                     if batch_newest_id_processed is None or entry.id > batch_newest_id_processed:
-                         batch_newest_id_processed = entry.id # Vẫn cần để check fetch đầy batch
 
+                     # Cập nhật ID mới nhất đã xử lý thành công *trong batch này*
+                     if batch_newest_id_processed is None or entry.id > batch_newest_id_processed:
+                         batch_newest_id_processed = entry.id
+
+                     # Đếm thread creation (giữ nguyên)
                      if entry.action == discord.AuditLogAction.thread_create and entry.user and not entry.user.bot:
                          user_thread_creation_counts[entry.user.id] += 1
 
@@ -377,23 +381,21 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
 
             log.debug(f"  Đã thêm {db_add_count_batch}/{len(logs_in_batch)} entry vào DB. ID mới nhất xử lý batch: {batch_newest_id_processed}")
 
-
-            # Kiểm tra xem batch có đầy không VÀ ID mới nhất có được xử lý không
-            if len(logs_in_batch) >= fetch_limit and batch_newest_id_processed:
+            # <<< FIX: Logic kiểm tra dừng/tiếp tục fetch >>>
+            # Nếu batch không đầy HOẶC không xử lý được entry nào trong batch -> dừng
+            if len(logs_in_batch) < fetch_limit or batch_newest_id_processed is None:
+                log.info(f"  Đã fetch hết audit log mới hoặc batch không đầy/xử lý được (batch {iteration+1}). Dừng fetch.")
+                break
+            else:
+                # Nếu batch đầy VÀ xử lý được entry mới nhất -> tiếp tục fetch từ entry đó
                 current_after_id = batch_newest_id_processed # Tiếp tục fetch sau ID mới nhất của batch này
                 log.info(f"  Fetch đầy batch, tiếp tục fetch sau ID: {current_after_id}...");
-                await asyncio.sleep(0.5)
-            else:
-                # Nếu batch không đầy HOẶC không xử lý được ID mới nhất => đã hết log mới
-                log.info(f"  Đã fetch hết audit log mới hoặc batch không đầy (batch {iteration+1}).")
-                break
-            # -----------------------------------------
+                await asyncio.sleep(0.5) # Delay nhẹ
+            # <<< END FIX >>>
 
             if iteration == max_iterations - 1: log.warning(f"Đạt giới hạn {max_iterations} lần fetch audit log."); scan_errors.append("Quét Audit Log dừng do giới hạn fetch."); break
 
-
         newest_processed_id = newest_id_in_scan # ID mới nhất thực sự đã thấy trong lần quét này
-        # -----------------------------------------------------------
         scan_data["audit_log_entries_added"] = audit_log_entries_added
         scan_data["newest_processed_audit_log_id"] = newest_processed_id
 
@@ -407,7 +409,6 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
     except Exception as audit_err:
         log.error(f"{e('error')} Lỗi xử lý Audit Log: {audit_err}", exc_info=True); scan_errors.append(f"Lỗi xử lý Audit Log: {audit_err}")
         scan_data["audit_log_scan_duration"] = discord.utils.utcnow() - audit_scan_start_time
-
 
     # --- Phân tích Role Grant Tracking từ DB ---
     if not tracked_role_ids:
@@ -434,25 +435,34 @@ async def _scan_and_analyze_audit_logs(scan_data: Dict[str, Any]):
             try: target_id = int(target_id_str)
             except (ValueError, TypeError): continue
 
-            # Trích xuất ID role trước và sau từ extra_data đã serialize
-            before_roles_data = extra_data.get('before', {}).get('roles', []) # List các dict role
-            after_roles_data = extra_data.get('after', {}).get('roles', [])   # List các dict role
-            # Lấy set các ID role (dạng string)
-            before_role_ids_str = {str(r.get('id')) for r in before_roles_data if isinstance(r, dict) and r.get('id')}
-            after_role_ids_str = {str(r.get('id')) for r in after_roles_data if isinstance(r, dict) and r.get('id')}
+            # <<< FIX: Logic trích xuất và kiểm tra role ID >>>
+            # Trích xuất list các dict role từ extra_data đã serialize
+            before_roles_data = extra_data.get('before', {}).get('roles', []) # Ví dụ: [{'id': '123', 'name': 'RoleA'}, ...]
+            after_roles_data = extra_data.get('after', {}).get('roles', [])
+
+            # Tạo set các ID role (dạng int) từ list dict
+            before_role_ids = set()
+            for r_data in before_roles_data:
+                if isinstance(r_data, dict) and 'id' in r_data:
+                    try: before_role_ids.add(int(r_data['id']))
+                    except (ValueError, TypeError): pass
+
+            after_role_ids = set()
+            for r_data in after_roles_data:
+                 if isinstance(r_data, dict) and 'id' in r_data:
+                    try: after_role_ids.add(int(r_data['id']))
+                    except (ValueError, TypeError): pass
 
             # Tìm các role ID đã được thêm
-            added_role_ids_str = after_role_ids_str - before_role_ids_str
+            added_role_ids = after_role_ids - before_role_ids
+            # <<< END FIX >>>
 
-            for rid_str in added_role_ids_str:
-                try:
-                    role_id_int = int(rid_str)
-                    # Kiểm tra xem role này có nằm trong danh sách cần theo dõi không
-                    if role_id_int in tracked_role_ids:
-                        # Tạo key tuple và tăng counter
-                        grant_key: Tuple[int, int] = (target_id, role_id_int)
-                        user_tracked_grants[grant_key] += 1
-                except ValueError: continue # Bỏ qua nếu ID role không phải số
+            for added_role_id in added_role_ids:
+                # Kiểm tra xem role này có nằm trong danh sách cần theo dõi không
+                if added_role_id in tracked_role_ids:
+                    # Tạo key tuple và tăng counter
+                    grant_key: Tuple[int, int] = (target_id, added_role_id)
+                    user_tracked_grants[grant_key] += 1
 
             processed_role_logs += 1
         log.info(f"Đã phân tích {processed_role_logs} role update log entry cho role grant tracking. Tìm thấy {len(user_tracked_grants)} grant records.")

@@ -8,9 +8,7 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union, Set, Tuple
 import unicodedata
 
-# <<< DI CHUYỂN ĐỊNH NGHĨA log LÊN ĐẦU NGAY SAU IMPORTS >>>
 log = logging.getLogger(__name__)
-# <<< ------------------------------------------------- >>>
 
 # Relative import
 try:
@@ -19,18 +17,13 @@ try:
     from .embeds_user import create_generic_leaderboard_embed # <<< Đảm bảo import này đúng
 except ImportError:
     # Fallback cho trường hợp chạy độc lập (nếu có)
-    log.warning("Running embeds_analysis.py with fallback imports.") # Log cảnh báo khi fallback
+    log.warning("Running embeds_analysis.py with fallback imports.")
     import utils
     import config
-    # Cần đảm bảo embeds_user có thể được import
     try:
-        # --- SỬA IMPORT TRONG FALLBACK ---
-        # Import từ thư mục hiện tại nếu chạy độc lập
         from embeds_user import create_generic_leaderboard_embed
-        # --- KẾT THÚC SỬA ---
     except ImportError:
-        # Hoặc định nghĩa lại hàm generic ở đây nếu cần test độc lập
-        log.warning("Không thể import create_generic_leaderboard_embed từ embeds_user trong fallback.") # Giờ log đã được định nghĩa
+        log.warning("Không thể import create_generic_leaderboard_embed từ embeds_user trong fallback.")
         create_generic_leaderboard_embed = None # Đặt là None để tránh lỗi sau này
     pass
 
@@ -39,6 +32,7 @@ except ImportError:
 KEYWORD_RANKING_LIMIT = 10
 TRACKED_ROLE_GRANTS_PER_EMBED = 15 # Giới hạn user mỗi embed danh hiệu
 TOP_EMOJI_REACTION_USAGE_LIMIT = 15 # Tăng giới hạn hiển thị emoji reaction
+MAX_ROLES_IN_SINGLE_TRACKED_EMBED = 5 # Ngưỡng để quyết định gộp hay tách embed BXH Role
 
 # --- Embed Functions ---
 
@@ -157,16 +151,15 @@ async def create_filtered_reaction_embed(
             found_emoji = bot.get_emoji(emoji_key)
             if found_emoji: display_emoji = str(found_emoji)
             else: display_emoji = f"`ID:{emoji_key}` (Unknown)" # Không tìm thấy trong cache?
-        elif emoji_key in config.REACTION_UNICODE_EXCEPTIONS:
+        elif isinstance(emoji_key, str): # Nếu là string (unicode exception)
              # Kiểm tra xem có phải emoji unicode không để hiển thị trực tiếp
             try:
                  # Thử phân tích thành emoji unicode
                  unicodedata.name(emoji_key)
                  display_emoji = emoji_key # Hiển thị trực tiếp emoji unicode được phép
-            except TypeError:
+            except (TypeError, ValueError):
                  # Không phải unicode hợp lệ? Vẫn hiển thị dạng string
                  pass
-
 
         emoji_lines.append(f"**`#{rank:02d}`**. {display_emoji} — **{count:,}** lần")
 
@@ -197,6 +190,8 @@ async def create_tracked_role_grant_leaderboards(
 
     # Lấy tất cả user_id *duy nhất* từ các key của counter
     all_user_ids = {uid for uid, rid in tracked_role_grants.keys()}
+    if not all_user_ids: # Không có ai nhận role nào cả
+        return embeds
 
     log.debug(f"Fetching {len(all_user_ids)} users for tracked role grant leaderboards...")
     user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
@@ -216,10 +211,8 @@ async def create_tracked_role_grant_leaderboards(
             log.warning(f"Lỗi fetch user {user_id} cho tracked role grants: {result}")
     log.debug("Fetch user data complete for tracked role grants.")
 
-
-    MAX_ROLES_IN_SINGLE_EMBED = 5 # Ngưỡng để quyết định gộp hay tách embed
-
-    if len(config.TRACKED_ROLE_GRANT_IDS) <= MAX_ROLES_IN_SINGLE_EMBED:
+    # <<< FIX: Logic tạo embed gộp hoặc riêng biệt >>>
+    if len(config.TRACKED_ROLE_GRANT_IDS) <= MAX_ROLES_IN_SINGLE_TRACKED_EMBED:
         # Gộp vào một embed
         embed = discord.Embed(
             title=f"{e('award')} BXH Danh Hiệu Đặc Biệt",
@@ -227,6 +220,8 @@ async def create_tracked_role_grant_leaderboards(
             color=discord.Color.purple()
         )
         field_count = 0
+        has_data_in_embed = False # Cờ kiểm tra có dữ liệu không
+
         for role_id in config.TRACKED_ROLE_GRANT_IDS:
             if field_count >= 25: break # Giới hạn field Discord
 
@@ -243,7 +238,8 @@ async def create_tracked_role_grant_leaderboards(
             })
             if not role_counter: continue # Bỏ qua nếu không ai nhận role này
 
-            field_name = f"{e('crown')} Top Nhận Role: {role.mention}"
+            has_data_in_embed = True # Có dữ liệu để hiển thị
+            field_name = f"{e('crown')} Top Nhận Role: {role.mention}" # <<< Hiển thị mention >>>
             field_lines = []
             sorted_users = role_counter.most_common(TRACKED_ROLE_GRANTS_PER_EMBED)
             for rank, (user_id, count) in enumerate(sorted_users, 1):
@@ -260,7 +256,7 @@ async def create_tracked_role_grant_leaderboards(
             embed.add_field(name=field_name, value=field_value, inline=False)
             field_count += 1
 
-        if embed.fields: # Chỉ thêm embed nếu có ít nhất 1 field
+        if has_data_in_embed: # Chỉ thêm embed nếu có ít nhất 1 field có dữ liệu
              embeds.append(embed)
 
     else:
@@ -280,7 +276,7 @@ async def create_tracked_role_grant_leaderboards(
             if not role_counter: continue
 
             embed = discord.Embed(
-                title=f"{e('award')} Top Nhận Role: {role.mention}",
+                title=f"{e('award')} Top Nhận Role: {role.mention}", # <<< Hiển thị mention >>>
                 description=f"*Số lần nhận role '{utils.escape_markdown(role.name)}' từ Audit Log.*",
                 color=role.color if role.color.value != 0 else discord.Color.purple()
             )
@@ -296,10 +292,12 @@ async def create_tracked_role_grant_leaderboards(
             if len(role_counter) > TRACKED_ROLE_GRANTS_PER_EMBED:
                  desc_lines.append(f"\n... và {len(role_counter) - TRACKED_ROLE_GRANTS_PER_EMBED} người khác.")
 
+            # Gắn vào description thay vì field
             embed.description += "\n\n" + "\n".join(desc_lines)
             if len(embed.description) > 4000:
                  embed.description = embed.description[:4000] + "\n... (quá dài)"
             embeds.append(embed)
+    # <<< END FIX >>>
 
     return embeds
 

@@ -2,13 +2,12 @@
 import asyncpg
 import os
 import datetime
-import json 
+import json
 from typing import Optional, Dict, Any, List, Union
 import logging
-import discord 
+import discord
 import discord.enums
 import asyncio
-
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ async def connect_db() -> Optional[asyncpg.Pool]:
             DATABASE_URL,
             min_size=2,
             max_size=10,
-            init=__set_json_codec,
+            init=__set_json_codec, # <<< Đảm bảo codec JSON được thiết lập
             command_timeout=60
         )
         log.info("Đã thiết lập nhóm kết nối cơ sở dữ liệu.")
@@ -100,13 +99,16 @@ async def setup_tables():
                     action_type TEXT NOT NULL,
                     reason TEXT,
                     created_at TIMESTAMPTZ NOT NULL,
-                    extra_data JSONB
+                    extra_data JSONB -- <<< Đảm bảo là JSONB để hiệu quả hơn
                 );
             """)
             # Index cho audit_log_cache
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_guild_time ON audit_log_cache (guild_id, created_at DESC);")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_action_type ON audit_log_cache (guild_id, action_type);")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_target_id ON audit_log_cache (target_id);")
+            # <<< FIX: Thêm index cho user_id và created_at để truy vấn log của user nhanh hơn nếu cần >>>
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_time ON audit_log_cache (user_id, created_at DESC);")
+            # <<< END FIX >>>
 
             # Bảng metadata của Guild
             await conn.execute("""
@@ -120,10 +122,12 @@ async def setup_tables():
     except Exception as e:
         log.error(f"Lỗi khi thiết lập bảng cơ sở dữ liệu: {e}", exc_info=True)
 
+# <<< FIX: Rà soát và cải thiện _serialize_value và _serialize_changes >>>
 def _serialize_value(value: Any) -> Any:
     """Serialize các giá trị riêng lẻ trong AuditLogChanges một cách an toàn cho JSON."""
     if isinstance(value, (str, int, bool, float)) or value is None:
         return value
+    # <<< FIX: Đảm bảo ID luôn là string để nhất quán JSON >>>
     elif isinstance(value, discord.Role):
         return {'id': str(value.id), 'name': value.name, 'type': 'role'}
     elif isinstance(value, (discord.Member, discord.User)):
@@ -133,13 +137,13 @@ def _serialize_value(value: Any) -> Any:
             'display_name': display, 'discriminator': value.discriminator,
             'bot': value.bot, 'type': 'user'
         }
-    elif isinstance(value, discord.abc.GuildChannel):
-        return {'id': str(value.id), 'name': value.name, 'type': str(value.type)}
-    elif isinstance(value, discord.Thread):
-        return {
-            'id': str(value.id), 'name': value.name,
-            'parent_id': str(value.parent_id), 'type': str(value.type)
-        }
+    elif isinstance(value, (discord.abc.GuildChannel, discord.Thread)): # Gộp channel và thread
+         parent_id = getattr(value, 'parent_id', None)
+         return {
+             'id': str(value.id), 'name': value.name, 'type': str(value.type),
+             'parent_id': str(parent_id) if parent_id else None
+         }
+    # <<< END FIX >>>
     elif isinstance(value, discord.Invite):
         return {
             'code': value.code,
@@ -150,7 +154,16 @@ def _serialize_value(value: Any) -> Any:
     elif isinstance(value, discord.Asset):
         return {'url': str(value), 'key': value.key, 'type': 'asset'}
     elif isinstance(value, datetime.datetime):
-        return {'iso': value.isoformat(), 'type': 'datetime'}
+        # <<< FIX: Luôn trả về ISO format UTC >>>
+        try:
+            if value.tzinfo is None:
+                aware_dt = value.replace(tzinfo=datetime.timezone.utc)
+            else:
+                aware_dt = value.astimezone(datetime.timezone.utc)
+            return {'iso_utc': aware_dt.isoformat(), 'type': 'datetime'}
+        except Exception: # Fallback nếu có lỗi timezone
+            return {'iso_naive': value.isoformat(), 'type': 'datetime_naive'}
+        # <<< END FIX >>>
     elif isinstance(value, datetime.timedelta):
         return {'total_seconds': value.total_seconds(), 'type': 'timedelta'}
     elif isinstance(value, discord.Colour):
@@ -161,27 +174,32 @@ def _serialize_value(value: Any) -> Any:
             'names': [name for name, enabled in iter(value) if enabled],
             'type': 'permissions'
         }
+    # <<< FIX: Xử lý list các object (quan trọng cho roles) >>>
     elif isinstance(value, list):
+        # Cẩn thận với list role objects
         return [_serialize_value(item) for item in value]
+    # <<< END FIX >>>
     elif isinstance(value, discord.enums.Enum):
         try:
             return {'name': value.name, 'value': value.value, 'type': type(value).__name__}
         except AttributeError: # Một số enum không có value?
             return {'repr': repr(value), 'type': type(value).__name__}
-    elif isinstance(value, discord.Object):
-        return {'id': str(value.id), 'type': 'object'}
+    # <<< FIX: Xử lý các Snowflake khác và fallback >>>
+    elif isinstance(value, discord.abc.Snowflake):
+         # Cố gắng lấy ID và tên nếu có
+         obj_id = str(value.id)
+         obj_name = getattr(value, 'name', None)
+         repr_val = repr(value)
+         data = {'id': obj_id, 'type': type(value).__name__, 'repr': repr_val}
+         if obj_name: data['name'] = obj_name
+         return data
     else:
-        try:
-            # Xử lý các Snowflake khác
-            if isinstance(value, discord.abc.Snowflake):
-                return {'id': str(value.id), 'repr': repr(value), 'type': type(value).__name__}
-            else:
-                # Fallback cho các loại không xác định
-                return {'repr': repr(value), 'type': str(type(value).__name__)}
-        except Exception:
-            log.debug(f"Không thể serialize đối tượng loại {type(value).__name__}: {value}")
-            return {'repr': 'Unserializable Object', 'type': str(type(value).__name__)}
-
+        # Fallback cuối cùng cho các loại không xác định
+        try: repr_val = repr(value)
+        except Exception: repr_val = "<Unrepresentable Object>"
+        log.debug(f"Không thể serialize đối tượng loại {type(value).__name__}: {repr_val[:100]}")
+        return {'repr': repr_val, 'type': str(type(value).__name__)}
+    # <<< END FIX >>>
 
 def _serialize_changes(changes: discord.AuditLogChanges) -> Optional[Dict[str, Any]]:
     """Serialize AuditLogChanges thành một dict tương thích JSON chi tiết."""
@@ -189,30 +207,44 @@ def _serialize_changes(changes: discord.AuditLogChanges) -> Optional[Dict[str, A
         return None
 
     data = {'before': {}, 'after': {}}
-    all_keys = set()
-    # Lấy thuộc tính từ before và after
-    if changes.before:
-        all_keys.update(k for k in dir(changes.before) if not k.startswith('_'))
-    if changes.after:
-        all_keys.update(k for k in dir(changes.after) if not k.startswith('_'))
+    # <<< FIX: Dùng dir() không an toàn, dùng __slots__ nếu có hoặc các thuộc tính đã biết >>>
+    # Thay vì dir(), chúng ta nên dựa vào các thuộc tính thường thấy trong changes
+    # Hoặc nếu cần chi tiết hơn, phải xử lý từng action type riêng biệt.
+    # Cách đơn giản và an toàn hơn là chỉ lấy các thuộc tính chính:
+    # Ví dụ: attributes_to_check = ['name', 'topic', 'roles', 'nick', 'mute', 'deaf', ...]
+    # Hoặc dựa vào __slots__ nếu có và đáng tin cậy
+    attributes_to_check = set()
+    if hasattr(changes.before, '__slots__'): attributes_to_check.update(changes.before.__slots__)
+    if hasattr(changes.after, '__slots__'): attributes_to_check.update(changes.after.__slots__)
+    # Thêm các key phổ biến khác nếu slots không đủ
+    attributes_to_check.update(['name', 'id', 'type', 'roles', 'nick', 'mute', 'deaf', 'permissions', 'color', 'hoist', 'mentionable', 'topic', 'nsfw', 'bitrate', 'user_limit'])
+    # <<< END FIX >>>
 
     keys_with_changes = set()
-    for attr in all_keys:
-        try:
-            before_val = getattr(changes.before, attr, None) if changes.before else None
-            after_val = getattr(changes.after, attr, None) if changes.after else None
+    for attr in attributes_to_check:
+        # Bỏ qua các thuộc tính private/magic
+        if attr.startswith('_'): continue
 
-            # Chỉ serialize nếu giá trị thay đổi và không phải là phương thức
-            if before_val != after_val and not callable(before_val) and not callable(after_val):
-                data['before'][attr] = _serialize_value(before_val)
-                data['after'][attr] = _serialize_value(after_val)
-                keys_with_changes.add(attr)
+        try:
+            before_val = getattr(changes.before, attr, discord.utils.MISSING) if changes.before else discord.utils.MISSING
+            after_val = getattr(changes.after, attr, discord.utils.MISSING) if changes.after else discord.utils.MISSING
+
+            # Chỉ serialize nếu giá trị tồn tại ở ít nhất một bên và khác nhau
+            # Và không phải là phương thức callable
+            if (before_val is not discord.utils.MISSING or after_val is not discord.utils.MISSING) and before_val != after_val:
+                 is_callable = callable(before_val) or callable(after_val)
+                 if not is_callable:
+                    if before_val is not discord.utils.MISSING:
+                        data['before'][attr] = _serialize_value(before_val)
+                    if after_val is not discord.utils.MISSING:
+                        data['after'][attr] = _serialize_value(after_val)
+                    keys_with_changes.add(attr)
         except Exception as e:
             log.debug(f"Lỗi serialize thuộc tính '{attr}' trong audit log changes: {e}")
 
     # Chỉ trả về nếu có sự thay đổi thực sự
     return data if keys_with_changes else None
-
+# <<< END FIX >>>
 
 async def add_audit_log_entry(log_entry: discord.AuditLogEntry):
     """Thêm hoặc cập nhật một entry audit log trong cache."""
@@ -233,16 +265,17 @@ async def add_audit_log_entry(log_entry: discord.AuditLogEntry):
                 elif isinstance(target_obj, dict) and 'id' in target_obj:
                     # Audit log đôi khi trả về dict cho target bị xóa
                     target_id = int(target_obj['id'])
-                elif isinstance(target_obj, str) and log_entry.action in []:
-                    # Xử lý trường hợp đặc biệt nếu target là string (hiếm)
+                elif isinstance(target_obj, str): # Xử lý target là string (ví dụ: webhook delete)
                     log.debug(f"Audit log target là string: '{target_obj}' for action {log_entry.action}. target_id sẽ là NULL.")
-                    target_id = None # Hoặc thử phân tích string nếu cần
+                    target_id = None
             except (ValueError, TypeError, AttributeError) as e:
                 log.warning(f"Không thể trích xuất ID từ audit log target type {type(target_obj)} (Value: {target_obj}, Action: {log_entry.action}): {e}")
                 target_id = None
 
             # Serialize dữ liệu thay đổi
+            # <<< FIX: Sử dụng _serialize_changes đã cải thiện >>>
             extra_data = _serialize_changes(log_entry.changes)
+            # <<< END FIX >>>
 
             # Câu lệnh UPSERT
             query = """
@@ -257,13 +290,19 @@ async def add_audit_log_entry(log_entry: discord.AuditLogEntry):
                     created_at = EXCLUDED.created_at,
                     extra_data = EXCLUDED.extra_data;
             """
+            # <<< FIX: Đảm bảo created_at có timezone >>>
+            created_at_aware = log_entry.created_at
+            if created_at_aware.tzinfo is None:
+                created_at_aware = created_at_aware.replace(tzinfo=datetime.timezone.utc)
+            # <<< END FIX >>>
+
             await conn.execute(query, log_entry.id, log_entry.guild.id, user_id, target_id,
                                str(log_entry.action.name), log_entry.reason,
-                               log_entry.created_at, extra_data)
-            log.debug(f"Đã thêm/cập nhật audit log entry {log_entry.id} cho guild {log_entry.guild.id}")
+                               created_at_aware, extra_data) # <<< FIX: Dùng created_at_aware
+            # log.debug(f"Đã thêm/cập nhật audit log entry {log_entry.id} cho guild {log_entry.guild.id}") # Giảm log
 
     except Exception as e:
-        log.error(f"Lỗi thêm entry audit log {log_entry.id} cho guild {log_entry.guild.id}: {e}", exc_info=False) # Chỉ log lỗi, không cần stacktrace thường xuyên
+        log.error(f"Lỗi thêm entry audit log {log_entry.id} cho guild {log_entry.guild.id}: {e}", exc_info=False)
 
 async def get_newest_audit_log_id_from_db(guild_id: int) -> Optional[int]:
     """Lấy ID của audit log mới nhất đã xử lý cho guild này từ guild_metadata."""
@@ -290,12 +329,20 @@ async def update_newest_audit_log_id(guild_id: int, newest_log_id: Optional[int]
         VALUES ($1, $2, $3)
         ON CONFLICT (guild_id) DO UPDATE SET
             last_audit_log_id = EXCLUDED.last_audit_log_id,
-            last_audit_scan_time = EXCLUDED.last_audit_scan_time;
+            last_audit_scan_time = EXCLUDED.last_audit_scan_time
+        WHERE EXCLUDED.last_audit_log_id IS NOT NULL AND -- <<< FIX: Chỉ cập nhật nếu newest_log_id mới lớn hơn
+              (guild_metadata.last_audit_log_id IS NULL OR EXCLUDED.last_audit_log_id > guild_metadata.last_audit_log_id);
     """
+    # <<< END FIX >>>
     try:
         async with pool.acquire() as conn:
-            await conn.execute(query, guild_id, newest_log_id, now)
-            log.info(f"Đã cập nhật ID audit log mới nhất cho guild {guild_id} thành {newest_log_id}")
+            # <<< FIX: Thực thi và kiểm tra kết quả >>>
+            result = await conn.execute(query, guild_id, newest_log_id, now)
+            if result and 'UPDATE 1' in result.upper() or 'INSERT 0 1' in result.upper():
+                 log.info(f"Đã cập nhật ID audit log mới nhất cho guild {guild_id} thành {newest_log_id}")
+            else:
+                 log.debug(f"ID audit log {newest_log_id} không mới hơn ID đã lưu cho guild {guild_id}. Bỏ qua cập nhật.")
+            # <<< END FIX >>>
     except Exception as e:
         log.error(f"Lỗi cập nhật ID audit log mới nhất cho guild {guild_id}: {e}", exc_info=False)
 
@@ -320,8 +367,13 @@ async def get_audit_logs_for_report(
 
     if time_after:
         param_count += 1
+        # <<< FIX: Đảm bảo time_after có timezone >>>
+        time_after_aware = time_after
+        if time_after_aware.tzinfo is None:
+            time_after_aware = time_after_aware.replace(tzinfo=datetime.timezone.utc)
         conditions.append(f"created_at > ${param_count}")
-        params.append(time_after)
+        params.append(time_after_aware)
+        # <<< END FIX >>>
 
     if action_filter:
         action_names = []
@@ -334,22 +386,19 @@ async def get_audit_logs_for_report(
                 log.warning(f"Loại action_filter không hợp lệ: {type(action)}, bỏ qua.")
 
         if action_names: # Chỉ thêm điều kiện nếu có action hợp lệ
-            if len(action_names) == 1:
-                param_count += 1
-                conditions.append(f"action_type = ${param_count}")
-                params.append(action_names[0])
-            elif len(action_names) > 1:
-                placeholders = ', '.join(f'${i + param_count + 1}' for i in range(len(action_names)))
-                conditions.append(f"action_type = ANY(ARRAY[{placeholders}])")
-                params.extend(action_names) # Truyền list các tên action (string)
-                param_count += len(action_names)
+            # <<< FIX: Sử dụng ANY() cho cả 1 hoặc nhiều action để code nhất quán >>>
+            placeholders = ', '.join(f'${i + param_count + 1}' for i in range(len(action_names)))
+            conditions.append(f"action_type = ANY(ARRAY[{placeholders}]::text[])") # Chỉ định kiểu là text[]
+            params.extend(action_names) # Truyền list các tên action (string)
+            param_count += len(action_names)
+            # <<< END FIX >>>
 
     # Ghép các điều kiện
     where_clause = " AND ".join(conditions)
     query = f"{query_base} WHERE {where_clause}"
 
     # Sắp xếp và giới hạn
-    query += f" ORDER BY created_at DESC"
+    query += f" ORDER BY created_at DESC" # Lấy mới nhất trước
     if limit is not None:
         param_count += 1
         query += f" LIMIT ${param_count}"

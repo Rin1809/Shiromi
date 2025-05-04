@@ -5,13 +5,12 @@ import math
 import logging
 import collections
 import asyncio
-from typing import List, Dict, Any, Optional, Union, Tuple, Set 
+from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
-
 
 try:
     from .. import utils
-    from .. import config 
+    from .. import config
 except ImportError:
     import utils
     import config
@@ -19,7 +18,6 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 # --- Constants ---
-
 TOP_ACTIVE_USERS_LIMIT = 30
 TOP_OLDEST_MEMBERS_LIMIT = 30
 TOP_LINK_USERS_LIMIT = 30
@@ -69,7 +67,8 @@ async def create_generic_leaderboard_embed(
     # Lọc và sắp xếp dữ liệu
     filtered_sorted_users = [
         (uid, count) for uid, count in counter_data.most_common()
-        if count > 0 and (not filter_admins or uid not in admin_ids_to_filter)
+        # <<< FIX: Đảm bảo uid là int trước khi kiểm tra lọc admin >>>
+        if count > 0 and (not filter_admins or not isinstance(uid, int) or uid not in admin_ids_to_filter)
     ]
 
     if not filtered_sorted_users:
@@ -93,23 +92,38 @@ async def create_generic_leaderboard_embed(
     users_to_display = filtered_sorted_users[:limit]
 
     # Fetch thông tin user cho top N và cache lại
-    user_ids_to_fetch = [uid for uid, count in users_to_display]
+    # <<< FIX: Chỉ fetch nếu user_id là int >>>
+    user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
     log.debug(f"Fetching {len(user_ids_to_fetch)} users for leaderboard '{title}'...")
     user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
-    fetch_tasks = [utils.fetch_user_data(guild, user_id, bot_ref=bot) for user_id in user_ids_to_fetch]
-    results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-    for idx, result in enumerate(results):
-        user_id = user_ids_to_fetch[idx]
-        if isinstance(result, (discord.User, discord.Member)): user_cache[user_id] = result
-        else: user_cache[user_id] = None
-        if isinstance(result, Exception): log.warning(f"Lỗi fetch user {user_id} cho leaderboard '{title}': {result}")
-    log.debug(f"Fetch user hoàn thành cho leaderboard '{title}'.")
+    if user_ids_to_fetch: # Chỉ fetch nếu có ID hợp lệ
+        fetch_tasks = [utils.fetch_user_data(guild, user_id, bot_ref=bot) for user_id in user_ids_to_fetch]
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        for idx, result in enumerate(results):
+            user_id = user_ids_to_fetch[idx]
+            if isinstance(result, (discord.User, discord.Member)): user_cache[user_id] = result
+            else: user_cache[user_id] = None
+            if isinstance(result, Exception): log.warning(f"Lỗi fetch user {user_id} cho leaderboard '{title}': {result}")
+        log.debug(f"Fetch user hoàn thành cho leaderboard '{title}'.")
 
     leaderboard_lines = []
     for rank, (user_id, count) in enumerate(users_to_display, 1):
-        user_obj = user_cache.get(user_id)
-        user_mention = user_obj.mention if user_obj else f"`{user_id}`"
-        user_display = f" (`{utils.escape_markdown(user_obj.display_name)}`)" if user_obj else " (Unknown/Left)"
+        user_obj = None
+        if isinstance(user_id, int): # Chỉ tìm trong cache nếu ID là int
+            user_obj = user_cache.get(user_id)
+
+        # <<< FIX: Xử lý hiển thị cho ID không phải int hoặc không fetch được >>>
+        if user_obj:
+            user_mention = user_obj.mention
+            user_display = f" (`{utils.escape_markdown(user_obj.display_name)}`)"
+        elif isinstance(user_id, int):
+            user_mention = f"`{user_id}`"
+            user_display = " (Unknown/Left)"
+        else: # Trường hợp key không phải int (vd: sticker ID)
+            user_mention = f"`{utils.escape_markdown(str(user_id))}`" # Hiển thị key gốc
+            user_display = ""
+        # <<< END FIX >>>
+
         item_name = item_name_plural if count != 1 else item_name_singular
         leaderboard_lines.append(f"**`#{rank:02d}`**. {user_mention}{user_display} — **{count:,}** {item_name}")
 
@@ -127,13 +141,10 @@ async def create_generic_leaderboard_embed(
 
 # --- Các hàm tạo Embed User cụ thể ---
 
-
-
 async def create_top_active_users_embed(
     user_activity: Dict[int, Dict[str, Any]], # Cần dữ liệu gốc để tạo Counter
     guild: discord.Guild,
     bot: Union[discord.Client, commands.Bot]
-    # Bỏ user_role_changes không cần thiết
 ) -> Optional[discord.Embed]:
     """Tạo embed top N user hoạt động nhiều nhất (theo số tin nhắn). Lọc admin."""
     e = lambda name: utils.get_emoji(name, bot)
@@ -155,7 +166,7 @@ async def create_top_active_users_embed(
             item_name_singular="tin nhắn", item_name_plural="tin nhắn",
             limit=TOP_ACTIVE_USERS_LIMIT,
             color=discord.Color.orange(),
-            show_total=False,
+            show_total=False, # Không cần tổng số tin nhắn ở đây
             filter_admins=True # <<< Lọc admin ở đây
         )
     except NameError: log.warning("Không thể tạo embed Top User Gửi Tin Nhắn do thiếu 'create_generic_leaderboard_embed'."); return None
@@ -206,13 +217,24 @@ async def create_top_image_posters_embed(counts: collections.Counter, guild: dis
     except NameError: return None
 
 async def create_top_custom_emoji_users_embed( # Đổi tên hàm rõ hơn
-    counts: collections.Counter, # Counter {user_id: {emoji_id: count}}
+    counts: collections.Counter, # Counter {user_id: {emoji_id: count}} hoặc Counter {user_id: total_count}
     guild: discord.Guild,
     bot: Union[discord.Client, commands.Bot]
 ) -> Optional[discord.Embed]:
     """Embed top user dùng custom emoji của server trong nội dung tin nhắn."""
-    # Tính tổng số custom emoji mỗi user đã dùng
-    user_total_counts = collections.Counter({uid: sum(ecounts.values()) for uid, ecounts in counts.items() if sum(ecounts.values()) > 0})
+    # <<< FIX: Xử lý cả 2 dạng input counter >>>
+    user_total_counts = None
+    if counts:
+        # Kiểm tra xem value đầu tiên là dict hay int để xác định loại counter
+        first_value = next(iter(counts.values()), None)
+        if isinstance(first_value, dict) or isinstance(first_value, collections.Counter):
+            # Input là {user_id: {emoji_id: count}}
+            user_total_counts = collections.Counter({uid: sum(ecounts.values()) for uid, ecounts in counts.items() if sum(ecounts.values()) > 0})
+        elif isinstance(first_value, int):
+             # Input đã là {user_id: total_count}
+             user_total_counts = counts
+    # <<< END FIX >>>
+
     if not user_total_counts: return None
     try:
         return await create_generic_leaderboard_embed(
@@ -275,15 +297,11 @@ async def create_top_activity_span_users_embed(
     user_spans: List[Tuple[int, datetime.timedelta]] = []
     for user_id, data in user_activity.items():
         if data.get('is_bot', False): continue
-        first_seen = data.get('first_seen'); last_seen = data.get('last_seen')
-        if first_seen and last_seen and last_seen >= first_seen:
-            try:
-                first_aware = first_seen.astimezone(datetime.timezone.utc) if first_seen.tzinfo else first_seen.replace(tzinfo=datetime.timezone.utc)
-                last_aware = last_seen.astimezone(datetime.timezone.utc) if last_seen.tzinfo else last_seen.replace(tzinfo=datetime.timezone.utc)
-                if last_aware >= first_aware:
-                    span = last_aware - first_aware
-                    if span.total_seconds() > 0: user_spans.append((user_id, span))
-            except Exception as ts_err: log.warning(f"Lỗi tính span cho user {user_id} (leaderboard): {ts_err}")
+        # <<< FIX: Lấy activity_span_seconds đã tính toán trước đó >>>
+        span_seconds = data.get('activity_span_seconds', 0.0)
+        if span_seconds > 0:
+             user_spans.append((user_id, datetime.timedelta(seconds=span_seconds)))
+        # <<< END FIX >>>
     if not user_spans: return None
     user_spans.sort(key=lambda item: item[1], reverse=True)
     embed = discord.Embed(title=f"{e('award')}{e('clock')} Top User Hoạt Động Lâu Nhất (Span)", description=f"*Dựa trên khoảng TG giữa tin nhắn đầu và cuối trong lần quét. Đã lọc bot.*", color=discord.Color.dark_grey())
@@ -332,15 +350,17 @@ async def create_top_booster_embed( # <<< THÊM MỚI
     embed = discord.Embed(
         title=f"{e('award')} {e('boost')} Top Booster Bền Bỉ",
         description="*Sắp xếp theo thời gian boost server lâu nhất.*",
-        color=discord.Color(0xf47fff)
+        color=discord.Color(0xf47fff) # Màu hồng boost
     )
     desc_lines = []
     for rank, member in enumerate(boosters[:limit], 1):
         boost_duration_str = "N/A"
         if member.premium_since:
             try:
+                # <<< FIX: Đảm bảo cả 2 thời gian đều aware UTC >>>
                 scan_end_time_aware = scan_end_time if scan_end_time.tzinfo else scan_end_time.replace(tzinfo=datetime.timezone.utc)
                 premium_since_aware = member.premium_since if member.premium_since.tzinfo else member.premium_since.replace(tzinfo=datetime.timezone.utc)
+                # <<< END FIX >>>
                 if scan_end_time_aware >= premium_since_aware:
                     boost_duration = scan_end_time_aware - premium_since_aware
                     boost_duration_str = utils.format_timedelta(boost_duration)
@@ -356,6 +376,5 @@ async def create_top_booster_embed( # <<< THÊM MỚI
     embed.description += "\n\n" + "\n".join(desc_lines)
     if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
     return embed
-
 
 # --- END OF FILE reporting/embeds_user.py ---

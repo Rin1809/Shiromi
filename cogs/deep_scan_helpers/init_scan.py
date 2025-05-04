@@ -4,7 +4,7 @@ from discord.ext import commands
 import logging
 import asyncio
 import time
-from typing import Dict, Any, List, Union, Optional
+from typing import Dict, Any, List, Union, Optional, Set
 from collections import Counter, defaultdict
 
 import config
@@ -19,7 +19,7 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
     """
     Thực hiện các bước khởi tạo và kiểm tra ban đầu cho quá trình quét.
     Bao gồm: gửi status ban đầu, tạo thread log, kiểm tra DB, xử lý keywords,
-    kiểm tra quyền bot, fetch dữ liệu cache ban đầu, lọc kênh có thể truy cập.
+    kiểm tra quyền bot, fetch dữ liệu cache ban đầu (bao gồm emoji/sticker), lọc kênh có thể truy cập.
 
     Trả về True nếu khởi tạo thành công, False nếu có lỗi nghiêm trọng.
     Cập nhật scan_data với các thông tin khởi tạo.
@@ -96,7 +96,7 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
         # Lỗi thiếu quyền cơ bản đã được xử lý và báo cáo trong _check_bot_permissions
         return False # Dừng nếu thiếu quyền cơ bản
 
-    # --- Lấy dữ liệu cache ban đầu ---
+    # --- Lấy dữ liệu cache ban đầu (members, roles, channels, EMOJIS, STICKERS) ---
     if not await _fetch_initial_cache(scan_data):
         # Lỗi fetch cache đã được xử lý và báo cáo trong _fetch_initial_cache
         return False # Dừng nếu không fetch được cache ban đầu
@@ -214,7 +214,7 @@ async def _check_bot_permissions(scan_data: Dict[str, Any]) -> bool:
 
 
 async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
-    """Fetch dữ liệu cache ban đầu (members, roles, channels)."""
+    """Fetch dữ liệu cache ban đầu (members, roles, channels, emojis, stickers)."""
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     scan_errors: List[str] = scan_data["scan_errors"]
@@ -226,19 +226,16 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
         # Cố gắng chunk hoặc fetch members để đảm bảo cache cập nhật
         if bot.intents.members:
             log.debug("Intents Members đang bật, đang fetch members...")
-            # --- SỬA Ở ĐÂY ---
-            # Dùng list comprehension với async for để lấy hết members
             try:
+                # <<< FIX: Sử dụng async for để fetch members >>>
                 current_members_list = [member async for member in server.fetch_members(limit=None)]
                 log.debug(f"Fetch {len(current_members_list)} members hoàn tất.")
             except discord.Forbidden:
                  log.error(f"{e('error')} Lỗi quyền khi fetch members. Bot có thiếu Members Intent không?")
-                 # Có thể raise lỗi hoặc trả về False tùy theo cách xử lý mong muốn
                  raise # Re-raise lỗi để dừng quét
             except discord.HTTPException as fetch_err:
                  log.error(f"{e('error')} Lỗi HTTP khi fetch members: {fetch_err.status} {fetch_err.text}")
                  raise # Re-raise lỗi
-            # --- KẾT THÚC SỬA ---
         else:
             log.warning("Members Intent đang tắt, dữ liệu member có thể không đầy đủ. Sử dụng cache hiện tại.")
             current_members_list = list(server.members) # Lấy từ cache nếu không fetch được
@@ -260,6 +257,37 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
             reverse=True
         )
         log.info(f"Tổng cộng {len(scan_data['all_roles_list'])} roles (không tính @everyone).")
+
+        # <<< FIX: Fetch và cache server emojis và stickers >>>
+        try:
+            server_emojis = await server.fetch_emojis()
+            scan_data["server_emojis_cache"] = {emoji.id: emoji for emoji in server_emojis}
+            log.info(f"Đã fetch và cache {len(scan_data['server_emojis_cache'])} emoji của server.")
+        except discord.Forbidden:
+            log.error(f"{e('error')} Lỗi quyền fetch emojis. Bỏ qua cache emoji.")
+            scan_data["server_emojis_cache"] = {}
+        except discord.HTTPException as emoji_err:
+            log.error(f"{e('error')} Lỗi HTTP fetch emojis: {emoji_err.status}. Bỏ qua cache emoji.")
+            scan_data["server_emojis_cache"] = {}
+        except Exception as e_emoji:
+            log.error(f"{e('error')} Lỗi không xác định fetch emojis: {e_emoji}. Bỏ qua cache emoji.")
+            scan_data["server_emojis_cache"] = {}
+
+        try:
+            server_stickers = await server.fetch_stickers()
+            scan_data["server_sticker_ids_cache"] = {sticker.id for sticker in server_stickers}
+            log.info(f"Đã fetch và cache {len(scan_data['server_sticker_ids_cache'])} sticker ID của server.")
+        except discord.Forbidden:
+            log.error(f"{e('error')} Lỗi quyền fetch stickers. Bỏ qua cache sticker.")
+            scan_data["server_sticker_ids_cache"] = set()
+        except discord.HTTPException as sticker_err:
+            log.error(f"{e('error')} Lỗi HTTP fetch stickers: {sticker_err.status}. Bỏ qua cache sticker.")
+            scan_data["server_sticker_ids_cache"] = set()
+        except Exception as e_sticker:
+            log.error(f"{e('error')} Lỗi không xác định fetch stickers: {e_sticker}. Bỏ qua cache sticker.")
+            scan_data["server_sticker_ids_cache"] = set()
+        # <<< END FIX >>>
+
         return True
 
     except discord.Forbidden:
@@ -376,7 +404,7 @@ def _create_start_embed(scan_data: Dict[str, Any]) -> discord.Embed:
     skipped_channels_count = scan_data["skipped_channels_count"]
     initiator_display_mention = f"{ctx.author.mention} (`{ctx.author.display_name}`)"
     log_thread = scan_data.get("log_thread")
-    target_keywords = scan_data.get("target_keywords", []) 
+    target_keywords = scan_data.get("target_keywords", [])
 
     start_embed = discord.Embed(
         title=f"{e('loading')} Chuẩn Bị Quét Sâu Server: {server.name}",

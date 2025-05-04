@@ -40,9 +40,9 @@ async def create_personal_activity_embed(
     msg_rank_str = f"(Hạng: **#{msg_rank}**)" if msg_rank else "" # Chỉ hiển thị nếu có hạng
     link_count = user_activity_data.get('link_count', 0)
     img_count = user_activity_data.get('image_count', 0)
-    # Lấy counter custom emoji của user này
-    user_custom_emoji_counts = scan_data.get("user_custom_emoji_content_counts", {}).get(user_id, Counter())
-    custom_emoji_total_count = sum(user_custom_emoji_counts.values())
+    # <<< FIX: Lấy đúng counter tổng custom emoji content của user >>>
+    custom_emoji_total_count = scan_data.get("user_total_custom_emoji_content_counts", {}).get(user_id, 0)
+    # <<< END FIX >>>
     sticker_count = user_activity_data.get('sticker_count', 0)
     other_file_count = user_activity_data.get('other_file_count', 0)
 
@@ -50,7 +50,9 @@ async def create_personal_activity_embed(
         f"{e('stats')} Tổng tin nhắn: **{msg_count:,}** {msg_rank_str}".strip(),
         f"{e('link')} Links đã gửi: {link_count:,}",
         f"{e('image')} Ảnh đã gửi: {img_count:,}",
-        f"{utils.get_emoji('mention', bot)} Emoji Server (Content): {custom_emoji_total_count:,}", # Giả sử utils.get_emoji đã xử lý bot ref
+        # <<< FIX: Sửa tên hiển thị và dùng dữ liệu đã fix >>>
+        f"{utils.get_emoji('mention', bot)} Emoji Server (Nội dung): {custom_emoji_total_count:,}",
+        # <<< END FIX >>>
         f"{e('sticker')} Stickers đã gửi: {sticker_count:,}",
         f"📎 Files khác: {other_file_count:,}"
     ]
@@ -83,8 +85,8 @@ async def create_personal_activity_embed(
     ]
     embed.add_field(name="⏳ Thời Gian Hoạt Động", value="\n".join(time_lines), inline=False)
 
-    # --- Field 4: Phạm vi hoạt động ---
-    distinct_channels_count = scan_data.get('user_distinct_channel_counts', {}).get(user_id, 0)
+    # <<< FIX: Field 4: Phạm vi hoạt động (Thêm kênh hoạt động nhiều nhất) >>>
+    distinct_channels_count = len(user_activity_data.get('channels_messaged_in', set())) # Lấy từ set
     most_active_data = scan_data.get('user_most_active_channel', {}).get(user_id) # Lấy dữ liệu đã tính
 
     scope_lines = [
@@ -102,7 +104,7 @@ async def create_personal_activity_embed(
         scope_lines.append("📍 Kênh hoạt động nhiều nhất: N/A")
 
     embed.add_field(name="🎯 Phạm Vi Hoạt Động", value="\n".join(scope_lines), inline=False)
-
+    # <<< END FIX >>>
 
     scan_end_time = scan_data.get("scan_end_time", datetime.datetime.now(datetime.timezone.utc))
     embed.set_footer(text=f"Dữ liệu quét từ {utils.format_discord_time(scan_end_time)}")
@@ -166,11 +168,16 @@ async def create_achievements_embed(
         grant_count = tracked_role_grants.get((user_id, tracked_role_id), 0)
         if grant_count > 0:
             role = guild.get_role(tracked_role_id)
-            role_name = role.name if role else f"ID: {tracked_role_id}"
+            # <<< FIX: Hiển thị mention của role >>>
+            role_mention = role.mention if role else f"`ID: {tracked_role_id}`"
+            role_name_fallback = f"'{role.name}'" if role else "(Unknown Role)"
+            # <<< END FIX >>>
             rank_key = f"tracked_role_{tracked_role_id}"
             rank = ranking_data.get(rank_key, {}).get(user_id)
             rank_str = f"(Hạng #{rank})" if rank else ""
-            special_role_lines.append(f'- Đã nhận "{utils.escape_markdown(role_name)}": **{grant_count}** lần {rank_str}'.strip())
+            # <<< FIX: Sử dụng mention >>>
+            special_role_lines.append(f'- Đã nhận {role_mention}: **{grant_count}** lần {rank_str}'.strip())
+            # <<< END FIX >>>
             has_achievements = True
 
     if special_role_lines:

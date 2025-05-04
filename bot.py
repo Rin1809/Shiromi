@@ -66,9 +66,6 @@ class ShiromiBot(commands.Bot):
 
         log.info("Logic setup hook đã hoàn thành.")
 
-    # Có thể thêm các phương thức hoặc thuộc tính khác cho bot ở đây nếu cần
-    # async def on_ready(self): # Có thể override on_ready ở đây thay vì dùng event decorator
-    #     await bot_events.handle_on_ready(self)
 
 
 # --- Cấu hình Bot ---
@@ -77,7 +74,7 @@ intents = bot_setup.create_intents()
 bot = ShiromiBot(intents=intents)
 
 # --- Đăng ký Event Handlers từ module events ---
-# Vẫn dùng event decorator cho các sự kiện khác nếu không override trong class
+
 @bot.event
 async def on_ready():
     await bot_events.handle_on_ready(bot) # Truyền bot instance vào handler
@@ -86,7 +83,6 @@ async def on_ready():
 async def on_command_error(ctx: commands.Context, error):
     await bot_events.handle_on_command_error(ctx, error, bot) # Truyền bot instance
 
-# Loại bỏ hàm setup_hook_logic và decorator @bot.setup_hook cũ
 
 # --- Chạy Bot ---
 async def main():

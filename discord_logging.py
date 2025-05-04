@@ -22,6 +22,14 @@ _bot_ref_for_log_sending: Optional[discord.Client] = None # Tham chiếu đến 
 
 log = logging.getLogger(__name__)
 
+# --- Constants Cải thiện ---
+LOG_BUFFER_MAX_LINES = 12     # Gửi khi đạt 12 dòng (thay vì 7)
+LOG_BUFFER_MAX_LENGTH = 1700  # Gửi khi dài hơn 1700 ký tự (thay vì 1200)
+LOG_BUFFER_SEND_INTERVAL = 8.0 # Gửi buffer ít nhất mỗi 8 giây (thay vì 5)
+LOG_MESSAGE_PART_DELAY = 1.4  # Delay giữa các phần của cùng 1 lô log (thay vì 1.1)
+LOG_RETRY_AFTER_BUFFER = 0.75 # Thêm 0.75s vào retry_after của Discord (thay vì 0.5)
+# --- End Constants Cải thiện ---
+
 # --- Hàm trợ giúp ---
 def strip_rich_markup(text: str) -> str:
     """Xóa các thẻ markup [color], [bold], etc. của Rich."""
@@ -104,15 +112,18 @@ async def send_log_batch(log_lines: List[str], thread_id: int, is_final: bool = 
             content_to_send = f"```log\n{safe_part.strip()}\n```"
             try:
                 await thread.send(content_to_send)
-                # Delay nhẹ giữa các tin nhắn để tránh flood/rate limit
+                # Delay giữa các tin nhắn để tránh flood/rate limit
                 if i < len(message_parts) - 1 or is_final:
-                    await asyncio.sleep(1.1) # Tăng nhẹ delay
+                    # <<< FIX: Sử dụng LOG_MESSAGE_PART_DELAY >>>
+                    await asyncio.sleep(LOG_MESSAGE_PART_DELAY)
             except discord.HTTPException as send_err:
                 log.error(f"HTTP {send_err.status} khi gửi phần log vào thread {thread_id}: {send_err.text}")
                 if send_err.status == 429: # Rate limited
                     retry_after = send_err.retry_after or 5.0
-                    log.warning(f"   -> Bị rate limit, chờ {retry_after:.2f}s...")
-                    await asyncio.sleep(retry_after + 0.5)
+                    # <<< FIX: Sử dụng LOG_RETRY_AFTER_BUFFER >>>
+                    wait_time = retry_after + LOG_RETRY_AFTER_BUFFER
+                    log.warning(f"   -> Bị rate limit, chờ {wait_time:.2f}s...")
+                    await asyncio.sleep(wait_time)
                 elif send_err.status >= 500: # Lỗi server Discord
                     log.warning("   -> Lỗi server Discord, chờ 5s...")
                     await asyncio.sleep(5)
@@ -161,7 +172,8 @@ def discord_log_sender(bot_loop: asyncio.AbstractEventLoop):
 
     log.info("[Discord Logger Thread] Bắt đầu.")
     last_send_time = time.monotonic()
-    buffer_send_interval = 5.0 # Gửi buffer mỗi 5 giây nếu có dữ liệu
+    # <<< FIX: Sử dụng constant đã định nghĩa >>>
+    buffer_send_interval = LOG_BUFFER_SEND_INTERVAL
 
     while discord_log_thread_active:
         send_buffer_now = False
@@ -212,9 +224,12 @@ def discord_log_sender(bot_loop: asyncio.AbstractEventLoop):
                 with discord_log_sender_lock:
                     if discord_target_thread: # Kiểm tra lại target trước khi thêm
                         discord_log_buffer.append(msg_with_emoji)
-                        # Gửi nếu buffer đủ lớn (số dòng HOẶC độ dài)
-                        if len(discord_log_buffer) >= 7 or len("\n".join(discord_log_buffer)) > 1200:
+                        # <<< FIX: Sử dụng constants mới để kiểm tra gửi buffer >>>
+                        buffer_len = len(discord_log_buffer)
+                        buffer_char_len = len("\n".join(discord_log_buffer))
+                        if buffer_len >= LOG_BUFFER_MAX_LINES or buffer_char_len > LOG_BUFFER_MAX_LENGTH:
                             send_buffer_now = True
+                        # <<< END FIX >>>
 
             # Đánh dấu record đã xử lý (dù có gửi hay không)
             log_queue.task_done()
@@ -223,8 +238,10 @@ def discord_log_sender(bot_loop: asyncio.AbstractEventLoop):
             # Timeout, kiểm tra xem có cần gửi buffer không (dựa trên thời gian)
             current_time = time.monotonic()
             with discord_log_sender_lock:
+                # <<< FIX: Sử dụng constant mới >>>
                 if discord_target_thread and discord_log_buffer and (current_time - last_send_time >= buffer_send_interval):
                     send_buffer_now = True
+                # <<< END FIX >>>
         except Exception as e:
             # Log lỗi của chính thread này (dùng print vì logger có thể lỗi)
             print(f"[LỖI Discord Logger Thread] Lỗi không xác định: {e}")
@@ -360,8 +377,18 @@ def set_log_target_thread(thread: Optional[discord.Thread]):
         else:
             if discord_target_thread is not None:
                 log.info("Xóa thread log đích.")
+                # Gửi nốt buffer còn lại TRƯỚC KHI xóa target
+                if discord_log_buffer:
+                    log.debug("Gửi nốt log buffer trước khi xóa target...")
+                    log_batch_to_send = list(discord_log_buffer)
+                    target_id_before_clear = discord_target_thread.id
+                    discord_log_buffer.clear()
+                    if _bot_ref_for_log_sending:
+                         asyncio.run_coroutine_threadsafe(
+                              send_log_batch(log_batch_to_send, target_id_before_clear, is_final=False), # Không phải final
+                              _bot_ref_for_log_sending.loop
+                         )
                 discord_target_thread = None
-                # Không cần xóa buffer ở đây, thread sender sẽ xử lý khi dừng
 
 def get_log_target_thread() -> Optional[discord.Thread]:
     """Lấy thread log đích hiện tại."""

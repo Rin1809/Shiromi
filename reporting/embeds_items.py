@@ -5,7 +5,7 @@ import math
 import logging
 import collections
 import asyncio
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Set # <<< Thêm Set
 
 # Relative import
 try:
@@ -13,23 +13,17 @@ try:
     from .embeds_user import create_generic_leaderboard_embed
 except ImportError:
     import utils
-    # from embeds_user import create_generic_leaderboard_embed
+    # from embeds_user import create_generic_leaderboard_embed # Giữ comment nếu vẫn có thể lỗi import vòng
     pass
 
 log = logging.getLogger(__name__)
 
 # --- Constants ---
-# Bỏ INVITES_PER_EMBED, WEBHOOKS_PER_EMBED, INTEGRATIONS_PER_EMBED
 TOP_INVITERS_LIMIT = 30
-TOP_STICKER_USAGE_LIMIT = 10
-
+TOP_STICKER_USAGE_LIMIT = 15 # <<< Tăng lên 15 để hiển thị nhiều hơn
 
 # --- Embed Functions ---
 
-# --- LOẠI BỎ: create_invite_embeds ---
-# --- LOẠI BỎ: create_webhook_integration_embeds ---
-
-# --- Giữ lại các hàm Leaderboard ---
 async def create_top_inviters_embed(
     invite_usage_counts: collections.Counter,
     guild: discord.Guild,
@@ -39,6 +33,12 @@ async def create_top_inviters_embed(
     e = lambda name: utils.get_emoji(name, bot)
     if not invite_usage_counts:
         return None
+
+    # <<< FIX: Kiểm tra sự tồn tại của hàm helper trước khi gọi >>>
+    if 'create_generic_leaderboard_embed' not in globals() or not callable(create_generic_leaderboard_embed):
+        log.warning("Không thể tạo embed Top Người Mời do thiếu 'create_generic_leaderboard_embed'.")
+        return None
+    # <<< END FIX >>>
 
     try:
         # Sử dụng hàm tạo leaderboard chung
@@ -52,10 +52,8 @@ async def create_top_inviters_embed(
             limit=TOP_INVITERS_LIMIT,
             color=discord.Color.dark_teal(),
             footer_note="Dựa trên lượt sử dụng các lời mời đang hoạt động đã quét."
+            # Mặc định filter_admins=True trong helper là ổn cho inviter
         )
-    except NameError:
-         log.warning("Không thể tạo embed Top Người Mời do thiếu 'create_generic_leaderboard_embed'.")
-         return None
     except Exception as err:
         log.error(f"Lỗi tạo embed Top Người Mời: {err}", exc_info=True)
         return None
@@ -64,12 +62,18 @@ async def create_top_inviters_embed(
 async def create_top_sticker_usage_embed(
     sticker_counts: collections.Counter,
     bot: discord.Client,
-    guild: discord.Guild, # Thêm tham số guild
+    guild: discord.Guild,
+    scan_data: Dict[str, Any], # <<< ADDED: Thêm scan_data để lấy sticker cache ID
     limit: int = TOP_STICKER_USAGE_LIMIT
 ) -> Optional[discord.Embed]:
     """Tạo embed hiển thị top stickers (server và mặc định) được sử dụng nhiều nhất."""
-    if not sticker_counts: return None
+    if not sticker_counts:
+        log.debug("Bỏ qua tạo Top Sticker Usage embed: Counter rỗng.")
+        return None
     e = lambda name: utils.get_emoji(name, bot)
+    # <<< ADDED: Lấy cache ID sticker server >>>
+    server_sticker_ids: Set[int] = scan_data.get("server_sticker_ids_cache", set())
+    # <<< END ADDED >>>
 
     embed = discord.Embed(
         title=f"{e('award')} {e('sticker')} Top {limit} Stickers Được Dùng",
@@ -91,26 +95,41 @@ async def create_top_sticker_usage_embed(
         results = await asyncio.gather(*(fetch_sticker_safe(sid) for sid in sticker_ids_to_fetch))
         for sticker in results:
             if sticker: fetched_stickers_cache[sticker.id] = sticker
-        log.debug("Fetch sticker hoàn thành.")
+        log.debug(f"Fetch sticker hoàn thành cho top usage. Cache size: {len(fetched_stickers_cache)}")
 
     sticker_lines = []
     for rank, (sticker_id_str, count) in enumerate(sorted_stickers, 1):
         display_sticker = f"ID: `{sticker_id_str}`" # Mặc định
-        sticker_obj = None
+        sticker_obj: Optional[discord.Sticker] = None
         is_server_sticker = False
+        sticker_name = "Unknown/Deleted" # Tên mặc định
 
         if sticker_id_str.isdigit():
-            sticker_obj = fetched_stickers_cache.get(int(sticker_id_str))
-            if isinstance(sticker_obj, discord.GuildSticker):
-                if sticker_obj.guild_id == guild.id: # Dùng guild.id
-                    is_server_sticker = True
-                    display_sticker += f" {e('star')}"
-                    
+            sticker_id = int(sticker_id_str)
+            # <<< FIX: Kiểm tra sticker server bằng cache ID >>>
+            if sticker_id in server_sticker_ids:
+                is_server_sticker = True
+            # <<< END FIX >>>
+            sticker_obj = fetched_stickers_cache.get(sticker_id)
+            if sticker_obj:
+                sticker_name = utils.escape_markdown(sticker_obj.name)
+                # Cập nhật lại display_sticker nếu fetch thành công
+                display_sticker = f"`{sticker_name}` (ID: `{sticker_id_str}`)"
 
         elif not sticker_id_str.isdigit(): # ID không hợp lệ?
             display_sticker = "`ID không hợp lệ?`"
+            sticker_name = "Invalid ID"
+
+        # <<< FIX: Thêm emoji sao nếu là sticker server >>>
+        if is_server_sticker:
+             display_sticker += f" {e('star')}"
+        # <<< END FIX >>>
 
         sticker_lines.append(f"**`#{rank:02d}`**. {display_sticker} — **{count:,}** lần")
+
+    if not sticker_lines: # Nếu sau khi xử lý không còn dòng nào hợp lệ
+        log.debug("Không có dòng sticker hợp lệ nào để hiển thị sau khi fetch/xử lý.")
+        return None
 
     if len(sticker_counts) > limit:
         sticker_lines.append(f"\n... và {len(sticker_counts) - limit} sticker khác.")
