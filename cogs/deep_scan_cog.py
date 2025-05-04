@@ -41,11 +41,6 @@ class ServerDeepScan(commands.Cog):
         """Hàm thực hiện logic quét sâu chính."""
         start_time_cmd = time.monotonic()
         overall_start_time = discord.utils.utcnow()
-        # Kiểm tra utils được import chưa
-        if not utils:
-            log.error("Utils module not loaded. Cannot proceed.")
-            await ctx.send("Lỗi nghiêm trọng: Thiếu module utils. Vui lòng khởi động lại bot.")
-            return
         e = lambda name: utils.get_emoji(name, self.bot)
 
         # <<< FIX: Khởi tạo scan_data đầy đủ các keys mới >>>
@@ -90,7 +85,6 @@ class ServerDeepScan(commands.Cog):
             "user_custom_emoji_content_counts": defaultdict(Counter), # {user_id: {emoji_id: count}}
             "overall_custom_emoji_content_counts": Counter(), # {emoji_id: count}
             "user_sticker_counts": Counter(),
-            "user_specific_sticker_counts": defaultdict(Counter), # <<< THÊM DÒNG NÀY
             "user_mention_given_counts": Counter(),
             "user_distinct_mention_given_counts": TypingDefaultDict(set),
             "user_mention_received_counts": Counter(),
@@ -103,6 +97,9 @@ class ServerDeepScan(commands.Cog):
             "user_most_active_channel": {}, # {user_id: (location_id, count)}
             "user_activity_message_counts": Counter(), # {user_id: total_message_count}
             "user_total_custom_emoji_content_counts": Counter(), # {user_id: total_custom_emoji_count}
+            # <<< THÊM: Khởi tạo counter sticker theo user >>>
+            "user_sticker_id_counts": defaultdict(Counter), # {user_id: {sticker_id: count}}
+            # <<< KẾT THÚC THÊM >>>
              # Hourly Activity Counters
             "server_hourly_activity": Counter(), # {hour: count}
             "channel_hourly_activity": defaultdict(Counter), # {channel_id: {hour: count}}
@@ -140,11 +137,6 @@ class ServerDeepScan(commands.Cog):
         # --- Phần logic try...except...finally ---
         try:
             log.info(f"{e('loading')} Khởi tạo quét sâu cho server: [bold cyan]{scan_data['server'].name}[/] ({scan_data['server'].id})")
-            # Kiểm tra config
-            if not config:
-                log.error("Config module not loaded. Cannot check Reaction Scan status.")
-                await ctx.send("Lỗi nghiêm trọng: Thiếu module config.")
-                return
             if config.ENABLE_REACTION_SCAN:
                 log.warning("[bold yellow]!!! Quét biểu cảm (Reaction Scan) đang BẬT. Quá trình quét có thể chậm hơn !!![/bold yellow]")
             if scan_data["admin_dm_test"]:
@@ -166,9 +158,7 @@ class ServerDeepScan(commands.Cog):
             await process_additional_data(scan_data)
 
             # ---- Giai đoạn 4: Tạo Báo cáo Embeds CÔNG KHAI ----
-            # <<< MODIFICATION START: Truyền scan_data vào generate_and_send_reports >>>
             await generate_and_send_reports(scan_data)
-            # <<< MODIFICATION END >>>
 
             # ---- Giai đoạn 5: Tạo File Xuất ----
             if scan_data["export_csv"] or scan_data["export_json"]:
@@ -208,15 +198,13 @@ class ServerDeepScan(commands.Cog):
         finally:
             # ---- Giai đoạn 7: Hoàn tất và Dọn dẹp ----
             await finalize_scan(scan_data)
-            # Kiểm tra discord_logging trước khi gọi
-            if discord_logging:
-                discord_logging.set_log_target_thread(None) # Đặt lại target log
+            discord_logging.set_log_target_thread(None) # Đặt lại target log
             log.info(f"[dim]Hoàn tất dọn dẹp sau lệnh {ctx.command.name if ctx.command else 'unknown'}.[/dim]")
 
-    # --- LỆNH !shiromiexp (GỬI DM CHO ADMIN - đổi tên từ testexp) ---
+    # --- LỆNH !test (GỬI DM CHO ADMIN) ---
     @commands.command(
-        name='shiromiexp', # <<< Đổi tên lệnh
-        aliases=['sds', 'serverdeepscan', 'testexp'], # <<< Giữ alias cũ
+        name='test',
+        aliases=['sds', 'serverdeepscan'],
         help=(
              '**(ADMIN TEST)** Thực hiện quét sâu và gửi báo cáo DM **CHỈ CHO ADMIN BOT**.\n'
              'Hữu ích để kiểm tra nội dung DM mà không gửi hàng loạt.\n\n'
@@ -225,9 +213,9 @@ class ServerDeepScan(commands.Cog):
              '`export_json=true/false` (tùy chọn, mặc định: false): Xuất báo cáo JSON.\n'
              '`keywords="text"` (tùy chọn): Danh sách từ khóa cần đếm.\n\n'
              '**Ví dụ:**\n'
-             f'`{config.COMMAND_PREFIX if config else "!"}shiromiexp` (Chỉ test DM, không export)\n'
-             f'`{config.COMMAND_PREFIX if config else "!"}shiromiexp export_csv=true` (Test DM và xuất CSV)\n'
-             f'`{config.COMMAND_PREFIX if config else "!"}shiromiexp keywords="abc"` (Test DM và tìm keyword)\n\n'
+             f'`{config.COMMAND_PREFIX}testexp` (Chỉ test DM, không export)\n'
+             f'`{config.COMMAND_PREFIX}testexp export_csv=true` (Test DM và xuất CSV)\n'
+             f'`{config.COMMAND_PREFIX}testexp keywords="abc"` (Test DM và tìm keyword)\n\n'
              '**Lưu ý:**\n'
              '- Lệnh này **CHỈ DÀNH CHO OWNER BOT**.\n'
              '- Yêu cầu bot có **Privileged Intents** và các quyền cần thiết.\n'
@@ -267,8 +255,8 @@ class ServerDeepScan(commands.Cog):
              '`export_json=true/false` (tùy chọn, mặc định: false): Xuất báo cáo JSON.\n'
              '`keywords="text"` (tùy chọn): Danh sách từ khóa cần đếm.\n\n'
              '**Ví dụ:**\n'
-             f'`{config.COMMAND_PREFIX if config else "!"}shiromirun` (Chạy bình thường, không export)\n'
-             f'`{config.COMMAND_PREFIX if config else "!"}shiromirun export_csv=true export_json=true` (Chạy và xuất cả hai)\n\n'
+             f'`{config.COMMAND_PREFIX}shiromirun` (Chạy bình thường, không export)\n'
+             f'`{config.COMMAND_PREFIX}shiromirun export_csv=true export_json=true` (Chạy và xuất cả hai)\n\n'
              '**Lưu ý:**\n'
              '- Lệnh này **CHỈ DÀNH CHO OWNER BOT**.\n'
              '- Yêu cầu cấu hình `DM_REPORT_RECIPIENT_ROLE_ID` trong .env.\n'

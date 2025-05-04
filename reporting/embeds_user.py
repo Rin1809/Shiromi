@@ -7,6 +7,7 @@ import collections
 import asyncio
 from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
+from collections import Counter # <<< THÊM DÒNG IMPORT NÀY >>>
 
 try:
     from .. import utils
@@ -69,6 +70,7 @@ async def create_generic_leaderboard_embed(
         (uid, count) for uid, count in counter_data.most_common()
         # <<< FIX: Đảm bảo uid là int trước khi kiểm tra lọc admin >>>
         if count > 0 and (not filter_admins or not isinstance(uid, int) or uid not in admin_ids_to_filter)
+           and not getattr(guild.get_member(uid), 'bot', True) # Lọc bot lần nữa cho chắc
     ]
 
     if not filtered_sorted_users:
@@ -97,13 +99,7 @@ async def create_generic_leaderboard_embed(
     log.debug(f"Fetching {len(user_ids_to_fetch)} users for leaderboard '{title}'...")
     user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
     if user_ids_to_fetch: # Chỉ fetch nếu có ID hợp lệ
-        fetch_tasks = [utils.fetch_user_data(guild, user_id, bot_ref=bot) for user_id in user_ids_to_fetch]
-        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-        for idx, result in enumerate(results):
-            user_id = user_ids_to_fetch[idx]
-            if isinstance(result, (discord.User, discord.Member)): user_cache[user_id] = result
-            else: user_cache[user_id] = None
-            if isinstance(result, Exception): log.warning(f"Lỗi fetch user {user_id} cho leaderboard '{title}': {result}")
+        user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot) # Sử dụng helper mới từ utils
         log.debug(f"Fetch user hoàn thành cho leaderboard '{title}'.")
 
     leaderboard_lines = []
@@ -216,37 +212,228 @@ async def create_top_image_posters_embed(counts: collections.Counter, guild: dis
     try: return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('image', bot)} Gửi Ảnh", "ảnh", "ảnh", TOP_IMAGE_USERS_LIMIT, discord.Color.dark_green(), filter_admins=True)
     except NameError: return None
 
-async def create_top_custom_emoji_users_embed( # Đổi tên hàm rõ hơn
-    counts: collections.Counter, # Counter {user_id: {emoji_id: count}} hoặc Counter {user_id: total_count}
+# --- VIẾT LẠI HÀM NÀY ---
+async def create_top_custom_emoji_users_embed(
+    scan_data: Dict[str, Any], # <<< Thay đổi: Nhận scan_data
     guild: discord.Guild,
     bot: Union[discord.Client, commands.Bot]
 ) -> Optional[discord.Embed]:
-    """Embed top user dùng custom emoji của server trong nội dung tin nhắn."""
-    # <<< FIX: Xử lý cả 2 dạng input counter >>>
-    user_total_counts = None
-    if counts:
-        # Kiểm tra xem value đầu tiên là dict hay int để xác định loại counter
-        first_value = next(iter(counts.values()), None)
-        if isinstance(first_value, dict) or isinstance(first_value, collections.Counter):
-            # Input là {user_id: {emoji_id: count}}
-            user_total_counts = collections.Counter({uid: sum(ecounts.values()) for uid, ecounts in counts.items() if sum(ecounts.values()) > 0})
-        elif isinstance(first_value, int):
-             # Input đã là {user_id: total_count}
-             user_total_counts = counts
-    # <<< END FIX >>>
+    """Embed top user dùng custom emoji của server trong nội dung tin nhắn, hiển thị emoji dùng nhiều nhất."""
+    e = lambda name: utils.get_emoji(name, bot)
+    limit = TOP_EMOJI_USERS_LIMIT
+    filter_admins = True # Lọc admin cho BXH này
 
-    if not user_total_counts: return None
-    try:
-        return await create_generic_leaderboard_embed(
-            user_total_counts, guild, bot,
-            f"{utils.get_emoji('mention', bot)} Dùng Custom Emoji Server (Content)",
-            "emoji", "emojis", TOP_EMOJI_USERS_LIMIT, discord.Color.dark_gold(), filter_admins=True
-        )
-    except NameError: return None
+    # Lấy dữ liệu cần thiết từ scan_data
+    user_detailed_counts: Dict[int, Counter] = scan_data.get("user_custom_emoji_content_counts", {})
+    # Tính tổng (hoặc lấy từ scan_data nếu có sẵn và đáng tin cậy)
+    user_total_counts = collections.Counter({
+        uid: sum(ecounts.values())
+        for uid, ecounts in user_detailed_counts.items()
+        if sum(ecounts.values()) > 0
+    })
 
-async def create_top_sticker_users_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    try: return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('sticker', bot)} Gửi Sticker", "sticker", "stickers", TOP_STICKER_USERS_LIMIT, discord.Color.dark_purple(), filter_admins=True)
-    except NameError: return None
+    if not user_total_counts:
+        log.debug("Bỏ qua tạo Top Custom Emoji Users embed: Không có dữ liệu.")
+        return None
+
+    # --- Lọc Admin ---
+    admin_ids_to_filter: Optional[Set[int]] = None
+    if filter_admins:
+        admin_ids_to_filter = {m.id for m in guild.members if m.guild_permissions.administrator}
+        admin_ids_to_filter.update(config.ADMIN_ROLE_IDS_FILTER)
+        if config.ADMIN_USER_ID: admin_ids_to_filter.add(config.ADMIN_USER_ID)
+
+    # Lọc và sắp xếp user theo tổng số emoji
+    filtered_sorted_users = [
+        (uid, total_count) for uid, total_count in user_total_counts.most_common()
+        if (not filter_admins or not isinstance(uid, int) or uid not in admin_ids_to_filter)
+           and not getattr(guild.get_member(uid), 'bot', True) # Lọc bot lần nữa cho chắc
+    ]
+
+    if not filtered_sorted_users:
+         log.debug("Bỏ qua tạo Top Custom Emoji Users embed: Không còn user sau khi lọc.")
+         return None
+
+    total_emojis_after_filter = sum(count for uid, count in filtered_sorted_users)
+    total_users_in_lb = len(filtered_sorted_users)
+
+    # --- Tạo Embed ---
+    embed = discord.Embed(
+        title=f"{e('award')} {e('mention')} Top User Dùng Custom Emoji Server (Content)",
+        color=discord.Color.dark_gold()
+    )
+    desc_prefix = "*Đã lọc bot."
+    if filter_admins: desc_prefix += " Đã lọc admin."
+    desc_lines = [
+        desc_prefix,
+        f"*Tổng cộng (sau lọc): **{total_emojis_after_filter:,}** emojis từ {total_users_in_lb} user.*"
+    ]
+
+    # --- Fetch User Data & Tạo Dòng Leaderboard ---
+    users_to_display = filtered_sorted_users[:limit]
+    user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
+    user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot) # Hàm helper fetch user
+
+    leaderboard_lines = []
+    emoji_cache: Dict[int, discord.Emoji] = scan_data.get("server_emojis_cache", {})
+
+    for rank, (user_id, total_count) in enumerate(users_to_display, 1):
+        user_obj = user_cache.get(user_id)
+        user_mention = user_obj.mention if user_obj else f"`{user_id}`"
+        user_display = f" (`{utils.escape_markdown(user_obj.display_name)}`)" if user_obj else " (Unknown/Left)"
+
+        # Tìm emoji dùng nhiều nhất
+        most_used_emoji_str = ""
+        user_specific_counts = user_detailed_counts.get(user_id, Counter()) # <<< Đảm bảo có Counter ở đây >>>
+        if user_specific_counts:
+            try:
+                # Tìm emoji_id có count cao nhất
+                most_used_id, _ = max(user_specific_counts.items(), key=lambda item: item[1])
+                # Lấy object emoji từ cache hoặc get_emoji
+                emoji_obj = emoji_cache.get(most_used_id) or bot.get_emoji(most_used_id)
+                if emoji_obj:
+                    most_used_emoji_str = f"(Top: {str(emoji_obj)})"
+                else:
+                    most_used_emoji_str = f"(Top ID: `{most_used_id}`)"
+            except ValueError: # Xảy ra nếu user_specific_counts rỗng (dù đã kiểm tra)
+                pass
+            except Exception as e_find:
+                log.warning(f"Lỗi tìm top emoji cho user {user_id}: {e_find}")
+
+        leaderboard_lines.append(f"**`#{rank:02d}`**. {user_mention}{user_display} — **{total_count:,}** emojis {most_used_emoji_str}".strip())
+
+    desc_lines.append("\n" + "\n".join(leaderboard_lines))
+
+    if total_users_in_lb > limit:
+        desc_lines.append(f"\n... và {total_users_in_lb - limit} người dùng khác.")
+
+    embed.description = "\n".join(desc_lines)
+    if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
+    # Không cần footer mặc định cho cái này
+
+    return embed
+
+# --- VIẾT LẠI HÀM NÀY ---
+async def create_top_sticker_users_embed(
+    scan_data: Dict[str, Any], # <<< Thay đổi: Nhận scan_data
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
+    """Embed top user gửi sticker, hiển thị sticker dùng nhiều nhất."""
+    e = lambda name: utils.get_emoji(name, bot)
+    limit = TOP_STICKER_USERS_LIMIT
+    filter_admins = True
+
+    # Lấy dữ liệu cần thiết
+    user_detailed_counts: Dict[int, Counter] = scan_data.get("user_sticker_id_counts", {})
+    user_total_counts: Counter = scan_data.get("user_sticker_counts", Counter()) # <<< Đảm bảo có Counter ở đây >>>
+
+    if not user_total_counts:
+        log.debug("Bỏ qua tạo Top Sticker Users embed: Không có dữ liệu.")
+        return None
+
+    # --- Lọc Admin ---
+    admin_ids_to_filter: Optional[Set[int]] = None
+    if filter_admins:
+        admin_ids_to_filter = {m.id for m in guild.members if m.guild_permissions.administrator}
+        admin_ids_to_filter.update(config.ADMIN_ROLE_IDS_FILTER)
+        if config.ADMIN_USER_ID: admin_ids_to_filter.add(config.ADMIN_USER_ID)
+
+    # Lọc và sắp xếp user theo tổng số sticker
+    filtered_sorted_users = [
+        (uid, total_count) for uid, total_count in user_total_counts.most_common()
+        if total_count > 0
+           and (not filter_admins or not isinstance(uid, int) or uid not in admin_ids_to_filter)
+           and not getattr(guild.get_member(uid), 'bot', True)
+    ]
+
+    if not filtered_sorted_users:
+         log.debug("Bỏ qua tạo Top Sticker Users embed: Không còn user sau khi lọc.")
+         return None
+
+    total_stickers_after_filter = sum(count for uid, count in filtered_sorted_users)
+    total_users_in_lb = len(filtered_sorted_users)
+
+    # --- Tạo Embed ---
+    embed = discord.Embed(
+        title=f"{e('award')} {e('sticker')} Top User Gửi Sticker",
+        color=discord.Color.dark_purple()
+    )
+    desc_prefix = "*Đã lọc bot."
+    if filter_admins: desc_prefix += " Đã lọc admin."
+    desc_lines = [
+        desc_prefix,
+        f"*Tổng cộng (sau lọc): **{total_stickers_after_filter:,}** stickers từ {total_users_in_lb} user.*"
+    ]
+
+    # --- Fetch User Data & Tạo Dòng Leaderboard ---
+    users_to_display = filtered_sorted_users[:limit]
+    user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
+    user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot) # Hàm helper fetch user
+
+    # Fetch sticker names (chỉ các sticker dùng nhiều nhất)
+    sticker_ids_to_fetch_names = set()
+    for user_id, _ in users_to_display:
+        user_specific_counts = user_detailed_counts.get(user_id, Counter())
+        if user_specific_counts:
+            try:
+                most_used_id_str, _ = max(user_specific_counts.items(), key=lambda item: item[1])
+                if most_used_id_str.isdigit():
+                    sticker_ids_to_fetch_names.add(int(most_used_id_str))
+            except ValueError: pass
+
+    sticker_name_cache: Dict[int, str] = {}
+    if sticker_ids_to_fetch_names:
+        log.debug(f"Fetching {len(sticker_ids_to_fetch_names)} sticker names for top sticker embed...")
+        async def fetch_sticker_name(sticker_id):
+            try:
+                sticker = await bot.fetch_sticker(sticker_id)
+                return sticker_id, sticker.name if sticker else None
+            except Exception:
+                return sticker_id, None
+        fetch_name_tasks = [fetch_sticker_name(sid) for sid in sticker_ids_to_fetch_names]
+        results = await asyncio.gather(*fetch_name_tasks, return_exceptions=True)
+        for res in results:
+            if isinstance(res, tuple):
+                sid, name = res
+                sticker_name_cache[sid] = name if name else "Unknown/Deleted"
+        log.debug("Fetch sticker names complete.")
+
+
+    leaderboard_lines = []
+    for rank, (user_id, total_count) in enumerate(users_to_display, 1):
+        user_obj = user_cache.get(user_id)
+        user_mention = user_obj.mention if user_obj else f"`{user_id}`"
+        user_display = f" (`{utils.escape_markdown(user_obj.display_name)}`)" if user_obj else " (Unknown/Left)"
+
+        # Tìm sticker dùng nhiều nhất
+        most_used_sticker_str = ""
+        user_specific_counts = user_detailed_counts.get(user_id, Counter())
+        if user_specific_counts:
+            try:
+                most_used_id_str, _ = max(user_specific_counts.items(), key=lambda item: item[1])
+                if most_used_id_str.isdigit():
+                    sticker_id = int(most_used_id_str)
+                    sticker_name = sticker_name_cache.get(sticker_id, "Loading...") # Lấy từ cache fetch
+                    most_used_sticker_str = f"(Top: '{utils.escape_markdown(sticker_name)}')" # <<< Thay đổi hiển thị tên
+                else:
+                     most_used_sticker_str = f"(Top ID: `{most_used_id_str}`)" # ID không hợp lệ?
+            except ValueError:
+                pass
+            except Exception as e_find:
+                log.warning(f"Lỗi tìm top sticker cho user {user_id}: {e_find}")
+
+        leaderboard_lines.append(f"**`#{rank:02d}`**. {user_mention}{user_display} — **{total_count:,}** stickers {most_used_sticker_str}".strip())
+
+    desc_lines.append("\n" + "\n".join(leaderboard_lines))
+
+    if total_users_in_lb > limit:
+        desc_lines.append(f"\n... và {total_users_in_lb - limit} người dùng khác.")
+
+    embed.description = "\n".join(desc_lines)
+    if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
+
+    return embed
 
 async def create_top_mentioned_users_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
     try: return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('mention', bot)} Được Nhắc Tên", "lần", "lần", TOP_MENTIONED_USERS_LIMIT, discord.Color.purple(), filter_admins=False) # Không lọc admin ở đây
@@ -307,14 +494,7 @@ async def create_top_activity_span_users_embed(
     embed = discord.Embed(title=f"{e('award')}{e('clock')} Top User Hoạt Động Lâu Nhất (Span)", description=f"*Dựa trên khoảng TG giữa tin nhắn đầu và cuối trong lần quét. Đã lọc bot.*", color=discord.Color.dark_grey())
     limit = TOP_ACTIVITY_SPAN_USERS_LIMIT
     user_ids_to_fetch = [uid for uid, span in user_spans[:limit]]
-    user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
-    fetch_tasks = [utils.fetch_user_data(guild, user_id, bot_ref=bot) for user_id in user_ids_to_fetch]
-    results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-    for idx, result in enumerate(results):
-        user_id = user_ids_to_fetch[idx]
-        if isinstance(result, (discord.User, discord.Member)): user_cache[user_id] = result
-        else: user_cache[user_id] = None
-        if isinstance(result, Exception): log.warning(f"Lỗi fetch user {user_id} cho activity span embed: {result}")
+    user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot) # Sử dụng helper từ utils
     desc_lines = []
     for rank, (user_id, span) in enumerate(user_spans[:limit], 1):
         user_obj = user_cache.get(user_id)

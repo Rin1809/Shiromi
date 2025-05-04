@@ -119,10 +119,15 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
         user_data['sticker_count'] = user_data.get('sticker_count', 0) + sticker_count
         overall_custom_sticker_counter = scan_data.setdefault("overall_custom_sticker_counts", Counter())
         sticker_usage_counter = scan_data.setdefault("sticker_usage_counts", Counter())
+        # <<< THÊM: Lấy hoặc tạo counter sticker theo user >>>
+        user_sticker_id_counter = scan_data.setdefault("user_sticker_id_counts", defaultdict(Counter))[author_id]
 
         for sticker_item in message.stickers:
              sticker_id_str = str(sticker_item.id)
              sticker_usage_counter[sticker_id_str] += 1
+             # <<< THÊM: Cập nhật counter sticker theo user >>>
+             user_sticker_id_counter[sticker_id_str] += 1
+             # <<< KẾT THÚC THÊM >>>
              # <<< FIX: Sử dụng server_sticker_ids_cache đã được khởi tạo >>>
              if sticker_item.id in server_sticker_ids_cache:
                   overall_custom_sticker_counter[sticker_item.id] += 1

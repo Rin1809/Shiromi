@@ -1,4 +1,4 @@
-# --- START OF FILE cogs/deep_scan_helpers/report_generation.py ---
+# --- START OF FILE reporting/report_generation.py ---
 # (Các import và hàm _send_report_embeds giữ nguyên)
 # ...
 import discord
@@ -144,8 +144,10 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     # <<< FIX: Truyền scan_data vào create_top_sticker_usage_embed >>>
     await _try_add_leaderboard(content_creation_embeds, embeds_items.create_top_sticker_usage_embed, sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data)
     # <<< END FIX >>>
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_custom_emoji_users_embed, scan_data.get("user_total_custom_emoji_content_counts", Counter()), guild=server, bot=bot) # Đã sửa để nhận counter tổng
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_sticker_users_embed, user_sticker_counts, guild=server, bot=bot)
+    # <<< THAY ĐỔI CÁCH GỌI 2 HÀM DƯỚI >>>
+    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_custom_emoji_users_embed, scan_data, guild=server, bot=bot) # Pass scan_data
+    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_sticker_users_embed, scan_data, guild=server, bot=bot) # Pass scan_data
+    # <<< KẾT THÚC THAY ĐỔI >>>
     await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_link_posters_embed, user_link_counts, guild=server, bot=bot)
     await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_image_posters_embed, user_image_counts, guild=server, bot=bot)
     await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_thread_creators_embed, user_thread_creation_counts, guild=server, bot=bot)
@@ -194,4 +196,4 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     end_time_reports = time.monotonic()
     log.info(f"✅ Hoàn thành tạo và gửi báo cáo embeds công khai trong {end_time_reports - start_time_reports:.2f}s.")
 
-# --- END OF FILE cogs/deep_scan_helpers/report_generation.py ---
+# --- END OF FILE reporting/report_generation.py ---

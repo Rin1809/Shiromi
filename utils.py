@@ -5,10 +5,11 @@ import datetime
 import time
 from dotenv import load_dotenv
 import os
-from typing import Optional, Union, List, Any, Dict, Set, Counter, Tuple 
+from typing import Optional, Union, List, Any, Dict, Set, Counter, Tuple
 import logging
 import re
 from collections import Counter # <<< THÊM IMPORT
+import asyncio # <<< THÊM IMPORT
 
 log = logging.getLogger(__name__)
 
@@ -214,5 +215,37 @@ def get_user_rank(
 ) -> Optional[int]:
     """Lấy thứ hạng của user từ dữ liệu xếp hạng đã chuẩn bị."""
     return ranking_data.get(rank_key, {}).get(user_id)
+
+# <<< THÊM HÀM HELPER _fetch_user_dict >>>
+async def _fetch_user_dict(guild: discord.Guild, user_ids: List[int], bot: Union[discord.Client, commands.Bot]) -> Dict[int, Optional[Union[discord.Member, discord.User]]]:
+    """Fetch a list of users/members efficiently and return a dictionary."""
+    user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
+    if not user_ids: return user_cache
+
+    # Tối ưu: Lấy từ cache guild trước nếu có thể
+    remaining_ids = []
+    for uid in user_ids:
+        member = guild.get_member(uid)
+        if member:
+            user_cache[uid] = member
+        else:
+            remaining_ids.append(uid)
+
+    # Fetch những user còn lại
+    if remaining_ids:
+        log.debug(f"Fetching {len(remaining_ids)} remaining users for dict cache...")
+        fetch_tasks = [fetch_user_data(guild, user_id, bot_ref=bot) for user_id in remaining_ids]
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        for idx, result in enumerate(results):
+            user_id = remaining_ids[idx]
+            if isinstance(result, (discord.User, discord.Member)):
+                user_cache[user_id] = result
+            else:
+                user_cache[user_id] = None # Mark as not found or error
+            if isinstance(result, Exception):
+                log.debug(f"Failed to fetch user {user_id} for dict: {result}")
+    return user_cache
+# <<< KẾT THÚC THÊM HÀM HELPER >>>
 
 # --- END OF FILE utils.py ---
