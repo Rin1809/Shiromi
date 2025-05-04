@@ -5,6 +5,7 @@ import math
 import logging
 import collections
 import asyncio
+import time # <<< ADDED IMPORT
 from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
 from collections import Counter, defaultdict # Đảm bảo có defaultdict
@@ -20,7 +21,7 @@ log = logging.getLogger(__name__)
 
 # --- Constants ---
 TOP_ACTIVE_USERS_LIMIT = 30
-TOP_OLDEST_MEMBERS_LIMIT = 30 # Giữ nguyên hoặc điều chỉnh nếu muốn
+TOP_OLDEST_MEMBERS_LIMIT = 15 # Giữ giới hạn thấp để tránh fetch nhiều user không cần thiết
 TOP_LINK_USERS_LIMIT = 30
 TOP_IMAGE_USERS_LIMIT = 30
 TOP_EMOJI_USERS_LIMIT = 30 # Custom emoji content
@@ -31,7 +32,7 @@ TOP_REPLIERS_LIMIT = 30
 TOP_REACTION_RECEIVED_USERS_LIMIT = 30
 TOP_ACTIVITY_SPAN_USERS_LIMIT = 30
 TOP_THREAD_CREATORS_LIMIT = 30
-TOP_DISTINCT_CHANNEL_USERS_LIMIT = 20 # Giới hạn top 20
+TOP_DISTINCT_CHANNEL_USERS_LIMIT = 20
 
 
 # --- Hàm Helper Tạo Embed Leaderboard Chung (Cập nhật để lọc admin) ---
@@ -46,7 +47,7 @@ async def create_generic_leaderboard_embed(
     color: discord.Color = discord.Color.blue(),
     show_total: bool = True,
     footer_note: Optional[str] = None,
-    filter_admins: bool = True # Thêm Cờ lọc admin
+    filter_admins: bool = True
 ) -> Optional[discord.Embed]:
     """
     Hàm chung để tạo embed leaderboard cho user dựa trên dữ liệu Counter.
@@ -165,98 +166,26 @@ async def create_top_active_users_embed(
         filter_admins=True
     )
 
-
-# <<< ***ĐẢM BẢO HÀM NÀY CÓ ĐÚNG CHỮ KÝ*** >>>
-async def create_top_oldest_members_embed(
-    oldest_members_data: List[Dict[str, Any]],
-    scan_data: Dict[str, Any], # ***Tham số này PHẢI CÓ***
-    bot: discord.Client,
-    limit: int = TOP_OLDEST_MEMBERS_LIMIT # Có thể thêm lại limit nếu cần
+async def create_top_link_posters_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
 ) -> Optional[discord.Embed]:
-    """Tạo embed top N thành viên tham gia server lâu nhất, hiển thị thêm thời gian tin nhắn đầu/cuối từ scan."""
-    e = lambda name: utils.get_emoji(name, bot)
-    if not oldest_members_data: return None
-
-    user_activity = scan_data.get("user_activity", {}) # <<< Lấy user_activity
-
-    display_limit = min(limit, len(oldest_members_data))
-    embed = discord.Embed(
-        title=f"{e('award')}{e('calendar')} Top {display_limit} Thành viên Lâu Năm Nhất",
-        description="*Dựa trên ngày tham gia server (`joined_at`). Đã lọc bot.\nMsg đầu/cuối tính theo thời gian quét.*",
-        color=discord.Color.dark_green()
+    return await create_generic_leaderboard_embed(
+        counts, guild, bot, f"{utils.get_emoji('link', bot)} Gửi Link", "link", "links",
+        TOP_LINK_USERS_LIMIT, discord.Color.dark_blue(), filter_admins=True
     )
-    desc_lines = []
-    now = discord.utils.utcnow()
 
-    # Fetch user data MỘT LẦN cho những người trong list
-    user_ids_to_fetch = [d.get('id') for d in oldest_members_data[:limit] if d.get('id')]
-    # Cần guild để fetch, lấy từ user đầu tiên nếu có hoặc từ bot nếu là Client
-    guild_for_fetch = None
-    if oldest_members_data:
-        first_user_id = oldest_members_data[0].get('id')
-        if first_user_id:
-            member_check = bot.get_user(first_user_id) # Thử lấy từ cache bot
-            if member_check and hasattr(member_check, 'guild'):
-                guild_for_fetch = member_check.guild
-            elif isinstance(bot, commands.Bot): # Nếu là Bot class, thử tìm guild
-                 for g in bot.guilds:
-                     if g.get_member(first_user_id):
-                         guild_for_fetch = g
-                         break
-    user_cache = await utils._fetch_user_dict(guild_for_fetch, user_ids_to_fetch, bot) if guild_for_fetch and user_ids_to_fetch else {}
+async def create_top_image_posters_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
+    return await create_generic_leaderboard_embed(
+        counts, guild, bot, f"{utils.get_emoji('image', bot)} Gửi Ảnh", "ảnh", "ảnh",
+        TOP_IMAGE_USERS_LIMIT, discord.Color.dark_green(), filter_admins=True
+    )
 
-
-    for rank, data in enumerate(oldest_members_data[:limit], 1):
-        user_id = data.get('id')
-        if not user_id: continue
-
-        user_mention = data.get('mention', f"`{user_id}`")
-        user_display_name = data.get('display_name', 'N/A')
-        user_display = f" (`{utils.escape_markdown(user_display_name)}`)"
-
-        joined_at = data.get('joined_at')
-        time_in_server_str = "N/A"
-        if isinstance(joined_at, datetime.datetime):
-            try:
-                join_aware = joined_at.astimezone(datetime.timezone.utc) if joined_at.tzinfo else joined_at.replace(tzinfo=datetime.timezone.utc)
-                if now >= join_aware: time_in_server_str = utils.format_timedelta(now - join_aware)
-                else: time_in_server_str = "Lỗi TG (Tương lai?)"
-            except Exception as ts_err: log.warning(f"Lỗi tính time_in_server cho {user_id}: {ts_err}"); time_in_server_str = "Lỗi TG"
-
-        # Lấy dữ liệu first/last seen từ user_activity
-        activity_data = user_activity.get(user_id)
-        first_seen = activity_data.get('first_seen') if activity_data else None
-        last_seen = activity_data.get('last_seen') if activity_data else None
-
-        # Định dạng thời gian first/last seen
-        first_msg_time_str = utils.format_discord_time(first_seen, 'f') if first_seen else "Không ghi nhận"
-        last_msg_time_str = utils.format_discord_time(last_seen, 'R') if last_seen else "Không ghi nhận"
-
-        # Tạo các dòng hiển thị
-        line1 = f"**`#{rank:02d}`**. {user_mention}{user_display}"
-        line2 = f"   ├ {e('calendar')} Tham gia: {utils.format_discord_time(joined_at, 'D')} ({time_in_server_str})"
-        line3 = f"   ├ {e('clock')} Msg đầu (scan): {first_msg_time_str}"
-        line4 = f"   └ {e('clock')} Msg cuối (scan): {last_msg_time_str}"
-        desc_lines.extend([line1, line2, line3, line4])
-
-    embed.description += "\n" + "\n".join(desc_lines)
-
-    if len(embed.description) > 4000:
-        embed.description = embed.description[:4000] + "\n... (quá dài)"
-
-    return embed
-# <<< ***KẾT THÚC KIỂM TRA HÀM NÀY*** >>>
-
-
-# --- Các hàm Leaderboard khác (sử dụng generic helper, có filter_admins) ---
-
-async def create_top_link_posters_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('link', bot)} Gửi Link", "link", "links", TOP_LINK_USERS_LIMIT, discord.Color.dark_blue(), filter_admins=True)
-
-async def create_top_image_posters_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('image', bot)} Gửi Ảnh", "ảnh", "ảnh", TOP_IMAGE_USERS_LIMIT, discord.Color.dark_green(), filter_admins=True)
-
-# --- VIẾT LẠI HÀM NÀY ---
 async def create_top_custom_emoji_users_embed(
     scan_data: Dict[str, Any], # Nhận scan_data
     guild: discord.Guild,
@@ -344,7 +273,6 @@ async def create_top_custom_emoji_users_embed(
     if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
     return embed
 
-# --- VIẾT LẠI HÀM NÀY ---
 async def create_top_sticker_users_embed(
     scan_data: Dict[str, Any], # Nhận scan_data
     guild: discord.Guild,
@@ -454,23 +382,47 @@ async def create_top_sticker_users_embed(
     if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
     return embed
 
-async def create_top_mentioned_users_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('mention', bot)} Được Nhắc Tên", "lần", "lần", TOP_MENTIONED_USERS_LIMIT, discord.Color.purple(), filter_admins=False)
+async def create_top_mentioned_users_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
+    return await create_generic_leaderboard_embed(
+        counts, guild, bot, f"{utils.get_emoji('mention', bot)} Được Nhắc Tên", "lần", "lần",
+        TOP_MENTIONED_USERS_LIMIT, discord.Color.purple(), filter_admins=False
+    )
 
-async def create_top_mentioning_users_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('mention', bot)} Hay Nhắc Tên", "lần nhắc", "lần nhắc", TOP_MENTIONING_USERS_LIMIT, discord.Color.dark_purple(), filter_admins=True)
+async def create_top_mentioning_users_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
+    return await create_generic_leaderboard_embed(
+        counts, guild, bot, f"{utils.get_emoji('mention', bot)} Hay Nhắc Tên", "lần nhắc", "lần nhắc",
+        TOP_MENTIONING_USERS_LIMIT, discord.Color.dark_purple(), filter_admins=True
+    )
 
-async def create_top_repliers_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
-    return await create_generic_leaderboard_embed(counts, guild, bot, f"{utils.get_emoji('reply', bot)} Trả Lời Tin Nhắn", "lần trả lời", "lần trả lời", TOP_REPLIERS_LIMIT, discord.Color.blue(), filter_admins=True)
+async def create_top_repliers_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
+    return await create_generic_leaderboard_embed(
+        counts, guild, bot, f"{utils.get_emoji('reply', bot)} Trả Lời Tin Nhắn", "lần trả lời", "lần trả lời",
+        TOP_REPLIERS_LIMIT, discord.Color.blue(), filter_admins=True
+    )
 
-async def create_top_reaction_received_users_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
+async def create_top_reaction_received_users_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
     return await create_generic_leaderboard_embed(
         counts, guild, bot, f"{utils.get_emoji('reaction', bot)} Nhận Reactions", "reaction", "reactions",
         TOP_REACTION_RECEIVED_USERS_LIMIT, discord.Color.gold(),
         footer_note="Yêu cầu bật Reaction Scan.", filter_admins=False
     )
 
-# --- THAY THẾ HOÀN TOÀN HÀM NÀY ---
 async def create_top_distinct_channel_users_embed(
     scan_data: Dict[str, Any], # Nhận scan_data
     guild: discord.Guild,
@@ -555,8 +507,6 @@ async def create_top_distinct_channel_users_embed(
         embed.description = embed.description[:4000] + "\n... (Nội dung quá dài)"
     embed.set_footer(text="Top 3 kênh/luồng hiển thị dựa trên số tin nhắn.")
     return embed
-# --- KẾT THÚC THAY THẾ ---
-
 
 async def create_top_activity_span_users_embed(
     user_activity: Dict[int, Dict[str, Any]],
@@ -593,14 +543,16 @@ async def create_top_activity_span_users_embed(
     if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
     return embed
 
-
-async def create_top_thread_creators_embed(counts: collections.Counter, guild: discord.Guild, bot: Union[discord.Client, commands.Bot]) -> Optional[discord.Embed]:
+async def create_top_thread_creators_embed(
+    counts: collections.Counter,
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot]
+) -> Optional[discord.Embed]:
     return await create_generic_leaderboard_embed(
         counts, guild, bot, f"{utils.get_emoji('thread', bot)} Tạo Thread", "thread", "threads",
         TOP_THREAD_CREATORS_LIMIT, discord.Color.dark_magenta(),
         footer_note="Yêu cầu quyền View Audit Log và theo dõi thread_create.", filter_admins=True
     )
-
 
 async def create_top_booster_embed( # Thêm mới
     boosters: List[discord.Member], # Danh sách booster đã sắp xếp theo tgian boost
@@ -639,5 +591,143 @@ async def create_top_booster_embed( # Thêm mới
     embed.description += "\n\n" + "\n".join(desc_lines)
     if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
     return embed
+
+# --- THÊM HÀM MỚI: create_top_oldest_members_embed ---
+async def create_top_oldest_members_embed(
+    oldest_members_data: List[Dict[str, Any]],
+    scan_data: Dict[str, Any], # Cần để lấy activity timestamps
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot],
+    limit: int = TOP_OLDEST_MEMBERS_LIMIT
+) -> Optional[discord.Embed]:
+    """Tạo embed hiển thị top N thành viên tham gia server sớm nhất."""
+    e = lambda name: utils.get_emoji(name, bot)
+    if not oldest_members_data:
+        return None
+
+    embed = discord.Embed(
+        title=f"{e('award')} {e('calendar')} Top Thành Viên Lâu Năm Nhất",
+        description=f"*Dựa trên ngày tham gia server. ({limit} người đầu tiên)*",
+        color=discord.Color.dark_grey()
+    )
+
+    user_activity = scan_data.get("user_activity", {})
+    user_most_active_channel = scan_data.get("user_most_active_channel", {})
+
+    # Fetch thông tin user (nên được thực hiện hiệu quả nếu dùng cache trong utils)
+    user_ids_to_fetch = [data['id'] for data in oldest_members_data[:limit] if 'id' in data]
+    user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot)
+
+    desc_lines = []
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+    for rank, data in enumerate(oldest_members_data[:limit], 1):
+        user_id = data.get('id')
+        if not user_id: continue
+
+        user_obj = user_cache.get(user_id)
+        user_mention = user_obj.mention if user_obj else f"`{user_id}`"
+        user_display = f" (`{utils.escape_markdown(user_obj.display_name)}`)" if user_obj else " (Unknown/Left)"
+
+        joined_at = data.get('joined_at')
+        joined_at_str = utils.format_discord_time(joined_at, 'D') if joined_at else "N/A"
+
+        # Tính toán thời gian trong server (approx)
+        days_in_server_str = "N/A"
+        if isinstance(joined_at, datetime.datetime):
+            try:
+                join_aware = joined_at.astimezone(datetime.timezone.utc) if joined_at.tzinfo else joined_at.replace(tzinfo=datetime.timezone.utc)
+                if now_utc >= join_aware:
+                    days_in_server = (now_utc - join_aware).days
+                    days_in_server_str = f"({days_in_server} ngày)"
+            except Exception: pass
+
+        # Lấy thông tin hoạt động từ scan_data
+        user_act_data = user_activity.get(user_id)
+        first_seen_str = "Chưa ghi nhận"
+        last_seen_str = "Chưa ghi nhận"
+        most_active_channel_str = ""
+
+        if user_act_data:
+            first_seen = user_act_data.get('first_seen')
+            last_seen = user_act_data.get('last_seen')
+            first_seen_str = utils.format_discord_time(first_seen, 'R') if first_seen else first_seen_str
+            last_seen_str = utils.format_discord_time(last_seen, 'R') if last_seen else last_seen_str
+
+            # Lấy kênh hoạt động nhiều nhất
+            most_active_data = user_most_active_channel.get(user_id)
+            if most_active_data:
+                loc_id, _ = most_active_data
+                channel_obj = guild.get_channel_or_thread(loc_id)
+                if channel_obj:
+                    most_active_channel_str = f"(Hay ở: {channel_obj.mention})"
+
+        desc_lines.append(
+            f"**`#{rank:02d}`**. {user_mention}{user_display}\n"
+            f"   └ Tham gia: **{joined_at_str}** {days_in_server_str}\n"
+            f"   └ HĐ Đầu/Cuối: {first_seen_str} / {last_seen_str} {most_active_channel_str}".strip()
+        )
+
+    embed.description += "\n\n" + "\n".join(desc_lines)
+    if len(embed.description) > 4000: embed.description = embed.description[:4000] + "\n... (quá dài)"
+
+    return embed
+# --- KẾT THÚC HÀM MỚI ---
+
+# --- START HELPER FUNCTION (Giữ nguyên) ---
+async def _fetch_sample_message(
+    guild: discord.Guild,
+    user_id: int,
+    timestamp: Optional[datetime.datetime],
+    channels_to_check: Set[int],
+    most_active_channel_id: Optional[int],
+    fetch_mode: str = 'around' # 'around', 'before', 'after', 'latest', 'oldest'
+) -> Optional[discord.Message]:
+    """Helper để fetch một tin nhắn mẫu."""
+    if not guild: return None
+    if not timestamp and fetch_mode not in ['latest', 'oldest']:
+        return None
+
+    channel_ids_ordered = []
+    if most_active_channel_id and most_active_channel_id in channels_to_check:
+        channel_ids_ordered.append(most_active_channel_id)
+    other_channels = list(channels_to_check - {most_active_channel_id})
+    channel_ids_ordered.extend(other_channels[:5])
+
+    if not channel_ids_ordered:
+        return None
+
+    for channel_id in channel_ids_ordered:
+        channel = guild.get_channel(channel_id)
+        if not channel or not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)):
+            continue
+        if not channel.permissions_for(guild.me).read_message_history:
+            log.debug(f"Skipping fetch in channel {channel_id} for user {user_id}: Missing Read History perms.")
+            continue
+
+        try:
+            history_params = {'limit': 1}
+            if fetch_mode == 'around' and timestamp: history_params['around'] = timestamp
+            elif fetch_mode == 'before' and timestamp: history_params['before'] = timestamp
+            elif fetch_mode == 'after' and timestamp: history_params['after'] = timestamp
+            elif fetch_mode == 'latest': pass
+            elif fetch_mode == 'oldest': history_params['oldest_first'] = True
+
+            async for msg in channel.history(**history_params):
+                if msg.author.id == user_id:
+                    log.debug(f"Fetched sample message {msg.id} for user {user_id} (mode: {fetch_mode}) in channel {channel_id}")
+                    return msg
+        except discord.NotFound:
+            log.debug(f"Channel {channel_id} not found during sample message fetch.")
+        except discord.Forbidden:
+            log.debug(f"Forbidden to fetch history in channel {channel_id} for user {user_id}.")
+        except discord.HTTPException as http_err:
+            log.warning(f"HTTP Error {http_err.status} fetching history in {channel_id} for user {user_id}.")
+        except Exception as e:
+            log.error(f"Unknown error fetching sample message in {channel_id} for user {user_id}: {e}", exc_info=False)
+
+    log.debug(f"Could not find sample message for user {user_id} (mode: {fetch_mode}) after checking {len(channel_ids_ordered)} channels.")
+    return None
+# --- END HELPER FUNCTION ---
 
 # --- END OF FILE reporting/embeds_user.py ---
