@@ -116,13 +116,15 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     rankings["mention_received"] = get_ranks_from_counter(scan_data.get("user_mention_received_counts"), filter_admin=False)
     rankings["mention_given"] = get_ranks_from_counter(scan_data.get("user_mention_given_counts"), filter_admin=True)
     rankings["distinct_channels"] = get_ranks_from_counter(scan_data.get("user_distinct_channel_counts"), filter_admin=True)
+    # THÊM HẠNG REACTION GIVEN
+    rankings["reaction_given"] = get_ranks_from_counter(scan_data.get("user_reaction_given_counts"), filter_admin=True)
 
     # Sáng Tạo Nội Dung
     rankings["custom_emoji_content"] = get_ranks_from_counter(scan_data.get("user_total_custom_emoji_content_counts"), filter_admin=True)
     rankings["stickers_sent"] = get_ranks_from_counter(scan_data.get("user_sticker_counts"), filter_admin=True)
     rankings["links_sent"] = get_ranks_from_counter(scan_data.get("user_link_counts"), filter_admin=True)
     rankings["images_sent"] = get_ranks_from_counter(scan_data.get("user_image_counts"), filter_admin=True)
-    rankings["threads_created"] = get_ranks_from_counter(scan_data.get("user_thread_creation_counts"), filter_admin=True) # <<< Sửa thành filter_admin
+    rankings["threads_created"] = get_ranks_from_counter(scan_data.get("user_thread_creation_counts"), filter_admin=True)
 
 
     # BXH Danh hiệu đặc biệt
@@ -290,7 +292,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             # Tạo tin nhắn chào mừng/cảm ơn (Logic cũ giữ nguyên)
             if user_has_thank_you_role:
                 thank_you_title = f"💖 Cảm ơn bạn đã là một phần tuyệt vời của {guild.name}! 💖"
-                # (nội dung cảm ơn như cũ) 
                 thank_you_body = (
                      f"🎀 | Chào cậu, {member.mention},\n\n"
                      f"Đầu tiên, thay mặt Rin - Misuzu và mọi người **{guild.name}**, bọn tớ xin gửi lời cảm ơn cậu vì đã **đóng góp/boost** cho server! ✨\n\n"
@@ -316,12 +317,12 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                  )
                  messages_to_send.append(greeting_msg)
 
-            # Tạo Embed Hoạt Động Cá Nhân
+            # Tạo Embed Hoạt Động Cá Nhân (Gọi hàm đã nâng cấp)
             personal_activity_embed = await embeds_dm.create_personal_activity_embed(member, scan_data, bot, ranking_data)
             if personal_activity_embed: embeds_to_send.append(personal_activity_embed)
             else: log.warning(f"Không thể tạo personal_activity_embed cho {member.display_name}")
 
-            # Tạo Embed Thành Tích & So Sánh
+            # Tạo Embed Thành Tích & So Sánh (Gọi hàm đã nâng cấp)
             achievements_embed = await embeds_dm.create_achievements_embed(member, scan_data, bot, ranking_data)
             if achievements_embed: embeds_to_send.append(achievements_embed)
             else: log.warning(f"Không thể tạo achievements_embed cho {member.display_name}")

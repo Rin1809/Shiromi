@@ -15,15 +15,15 @@ log = logging.getLogger(__name__)
 
 # --- Cấu hình Emoji (Load từ .env hoặc fallback) ---
 load_dotenv()
-# ... (Phần định nghĩa EMOJI_IDS như cũ) ...
+# Định nghĩa EMOJI_IDS từ .env hoặc giá trị mặc định
 EMOJI_IDS = {
     "stats": os.getenv("EMOJI_STATS", "📊"),
     "text_channel": os.getenv("EMOJI_TEXT_CHANNEL", "📄"),
     "voice_channel": os.getenv("EMOJI_VOICE_CHANNEL", "🔊"),
     "user_activity": os.getenv("EMOJI_USER_ACTIVITY", "👥"),
-    "boost": os.getenv("EMOJI_BOOST", "<:boost:123>"),
-    "boost_animated": os.getenv("EMOJI_BOOST_ANIMATED", "<a:boost:123>"),
-    "error": os.getenv("EMOJI_ERROR", "‼️"),
+    "boost": os.getenv("EMOJI_BOOST", "<:g_hCastoCozy:1360103927009378456>"),
+    "boost_animated": os.getenv("EMOJI_BOOST_ANIMATED", "<a:Eru_shika:1260952522882027582>"),
+    "error": os.getenv("EMOJI_ERROR", "⚠️"),
     "success": os.getenv("EMOJI_SUCCESS", "✅"),
     "loading": os.getenv("EMOJI_LOADING", "⏳"),
     "clock": os.getenv("EMOJI_CLOCK", "⏱️"),
@@ -31,14 +31,14 @@ EMOJI_IDS = {
     "crown": os.getenv("EMOJI_CROWN", "👑"),
     "members": os.getenv("EMOJI_MEMBERS", "👥"),
     "bot_tag": os.getenv("EMOJI_BOT_TAG", "🤖"),
-    "role": os.getenv("EMOJI_ROLE", "<:role:123>"),
+    "role": os.getenv("EMOJI_ROLE", "<:a_cann:1360113811788398652>"),
     "id_card": os.getenv("EMOJI_ID_CARD", "🆔"),
     "shield": os.getenv("EMOJI_SHIELD", "🛡️"),
     "lock": os.getenv("EMOJI_LOCK", "🔐"),
     "bell": os.getenv("EMOJI_BELL", "🔔"),
     "rules": os.getenv("EMOJI_RULES", "📜"),
     "megaphone": os.getenv("EMOJI_MEGAPHONE", "📢"),
-    "zzz": os.getenv("EMOJI_AFK", "💤"),
+    "zzz": os.getenv("EMOJI_AFK", "💤"), # Sửa tên key thành zzz nếu dùng EMOJI_AFK
     "star": os.getenv("EMOJI_STAR_FEATURE", "✨"),
     "online": os.getenv("EMOJI_STATUS_ONLINE", "🟢"),
     "idle": os.getenv("EMOJI_STATUS_IDLE", "🌙"),
@@ -49,21 +49,22 @@ EMOJI_IDS = {
     "stage": os.getenv("EMOJI_STAGE_CHANNEL", "🎤"),
     "forum": os.getenv("EMOJI_FORUM_CHANNEL", "💬"),
     "invite": os.getenv("EMOJI_INVITE", "🔗"),
-    "webhook": os.getenv("EMOJI_WEBHOOK", "<:webhook:123>"),
+    "webhook": os.getenv("EMOJI_WEBHOOK", "<:webhook:your_webhook_emoji_id>"), # Giữ nguyên ID placeholder nếu không có trong .env
     "integration": os.getenv("EMOJI_INTEGRATION", "🔌"),
     "csv_file": os.getenv("EMOJI_CSV_FILE", "💾"),
-    "json_file": os.getenv("EMOJI_JSON_FILE", "<:json:123>"),
+    "json_file": os.getenv("EMOJI_JSON_FILE", "<:json:12345>"), # Giữ nguyên ID placeholder nếu không có trong .env
     "mention": os.getenv("EMOJI_MENTION", "@"),
-    "hashtag": os.getenv("EMOJI_HASHTAG", "#️⃣"),
-    "thread": os.getenv("EMOJI_THREAD", "<:thread:123>"),
+    "hashtag": os.getenv("EMOJI_HASHTAG", "#"),
+    "thread": os.getenv("EMOJI_THREAD", "<a:z_1049623938931630101:1274398186508783649>"),
     "warning": os.getenv("EMOJI_WARNING", "⚠️"),
     "reaction": os.getenv("EMOJI_REACTION", "👍"),
     "link": os.getenv("EMOJI_LINK", "🔗"),
     "image": os.getenv("EMOJI_IMAGE", "🖼️"),
     "sticker": os.getenv("EMOJI_STICKER", "✨"),
     "award": os.getenv("EMOJI_AWARD", "🏆"),
-    "reply": os.getenv("EMOJI_REPLY", "↪️"),
+    "reply": os.getenv("EMOJI_REPLY", "↪️"), # Thêm key reply nếu chưa có
 }
+
 
 _emoji_cache: Dict[str, str] = {}
 _bot_ref_for_emoji: Optional[discord.Client] = None
@@ -106,7 +107,7 @@ def format_timedelta(delta: Optional[datetime.timedelta], high_precision=False) 
         if current_hours > 0: parts.append(f"{current_hours} giờ")
         if minutes > 0: parts.append(f"{minutes} phút")
         if seconds > 0 or not parts:
-            if high_precision and total_seconds < 1 and delta.microseconds > 0:
+            if high_precision and total_seconds < 1 and hasattr(delta, 'microseconds') and delta.microseconds > 0: # Check microseconds exists
                 ms = delta.microseconds // 1000; parts.append(f"{ms} ms" if ms > 0 else "<1 giây")
             else: parts.append(f"{seconds} giây")
         return " ".join(parts) if parts else "0 giây"
@@ -216,15 +217,18 @@ def get_user_rank(
     """Lấy thứ hạng của user từ dữ liệu xếp hạng đã chuẩn bị."""
     return ranking_data.get(rank_key, {}).get(user_id)
 
-# <<< THÊM HÀM HELPER _fetch_user_dict >>>
+# --- THÊM HÀM HELPER _fetch_user_dict ---
 async def _fetch_user_dict(guild: discord.Guild, user_ids: List[int], bot: Union[discord.Client, commands.Bot]) -> Dict[int, Optional[Union[discord.Member, discord.User]]]:
     """Fetch a list of users/members efficiently and return a dictionary."""
     user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
     if not user_ids: return user_cache
 
+    # Loại bỏ ID trùng lặp và không hợp lệ
+    valid_user_ids = list(set(uid for uid in user_ids if isinstance(uid, int)))
+
     # Tối ưu: Lấy từ cache guild trước nếu có thể
     remaining_ids = []
-    for uid in user_ids:
+    for uid in valid_user_ids:
         member = guild.get_member(uid)
         if member:
             user_cache[uid] = member
@@ -246,6 +250,62 @@ async def _fetch_user_dict(guild: discord.Guild, user_ids: List[int], bot: Union
             if isinstance(result, Exception):
                 log.debug(f"Failed to fetch user {user_id} for dict: {result}")
     return user_cache
-# <<< KẾT THÚC THÊM HÀM HELPER >>>
+# --- KẾT THÚC THÊM HÀM HELPER _fetch_user_dict ---
+
+# --- THÊM HÀM HELPER FETCH STICKER DICT ---
+async def _fetch_sticker_dict(sticker_ids: List[int], bot: Union[discord.Client, commands.Bot]) -> Dict[int, str]:
+    """Fetch sticker names efficiently and return a dictionary {id: name}."""
+    sticker_cache: Dict[int, str] = {}
+    if not sticker_ids or not bot:
+        return sticker_cache
+
+    # Loại bỏ ID trùng lặp và không hợp lệ
+    unique_sticker_ids = list(set(sid for sid in sticker_ids if isinstance(sid, int)))
+    if not unique_sticker_ids: return sticker_cache
+
+    async def fetch_sticker_name(sticker_id):
+        try:
+            sticker = await bot.fetch_sticker(sticker_id)
+            return sticker_id, sticker.name if sticker else "Unknown/Deleted"
+        except discord.NotFound:
+            return sticker_id, "Unknown/Deleted"
+        except Exception as e:
+            log.debug(f"Failed to fetch sticker {sticker_id}: {e}")
+            return sticker_id, "Fetch Error"
+
+    log.debug(f"Fetching names for {len(unique_sticker_ids)} unique stickers...")
+    fetch_tasks = [fetch_sticker_name(sid) for sid in unique_sticker_ids]
+    results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    for res in results:
+        if isinstance(res, tuple):
+            sticker_id, name = res
+            sticker_cache[sticker_id] = name
+        elif isinstance(res, Exception):
+            # Lỗi không mong muốn, không lưu vào cache
+            pass
+    log.debug(f"Sticker name fetch complete. Cache size: {len(sticker_cache)}")
+    return sticker_cache
+# --- KẾT THÚC HÀM HELPER FETCH STICKER DICT ---
+
+# --- THÊM HÀM LẤY TIMEZONE OFFSET ---
+# Biến toàn cục để lưu offset đã tính (tránh tính lại nhiều lần)
+local_timezone_offset_hours: Optional[int] = None
+
+def get_local_timezone_offset() -> int:
+    """Trả về offset timezone local so với UTC tính bằng giờ."""
+    global local_timezone_offset_hours
+    if local_timezone_offset_hours is None:
+        try:
+            # time.timezone trả về offset tính bằng giây phía TÂY UTC (nên cần đảo dấu)
+            local_offset_seconds = time.timezone
+            # Chia cho 3600 để đổi sang giờ, dùng round để xử lý offset 30 phút
+            local_timezone_offset_hours = round(local_offset_seconds / -3600)
+            log.info(f"Xác định timezone offset của bot: UTC{local_timezone_offset_hours:+d}")
+        except Exception as tz_err:
+            log.warning(f"Không thể xác định timezone offset của bot: {tz_err}. Mặc định về UTC (0).")
+            local_timezone_offset_hours = 0 # Fallback về UTC nếu lỗi
+    return local_timezone_offset_hours
+# --- KẾT THÚC HÀM LẤY TIMEZONE OFFSET ---
 
 # --- END OF FILE utils.py ---

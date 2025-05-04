@@ -66,6 +66,11 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
     else:
         scan_data.setdefault("channel_hourly_activity", defaultdict(Counter))[location_id][hour] += 1
 
+    # --- THÊM THU THẬP GIỜ USER ---
+    # Thu thập dữ liệu giờ cho user
+    scan_data.setdefault("user_hourly_activity", defaultdict(Counter))[author_id][hour] += 1
+    # --- KẾT THÚC THÊM ---
+
     # --- Phân tích nội dung tin nhắn (chỉ cho user không phải bot) ---
     msg_content = message.content or ""
     msg_content_lower = msg_content.lower()
