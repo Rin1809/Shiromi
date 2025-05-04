@@ -12,20 +12,11 @@ from collections import Counter, defaultdict
 log = logging.getLogger(__name__)
 
 # Relative import
-try:
-    from .. import utils
-    from .. import config
-    from .embeds_user import create_generic_leaderboard_embed
-except ImportError:
-    log.warning("Running embeds_analysis.py with fallback imports.")
-    import utils
-    import config
-    try:
-        from embeds_user import create_generic_leaderboard_embed
-    except ImportError:
-        log.warning("Không thể import create_generic_leaderboard_embed từ embeds_user trong fallback.")
-        create_generic_leaderboard_embed = None
-    pass
+# Sử dụng import tuyệt đối cho utils và config
+import utils
+import config
+# Giữ lại relative import cho cùng thư mục
+from .embeds_user import create_generic_leaderboard_embed
 
 
 # --- Constants ---

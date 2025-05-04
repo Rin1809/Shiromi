@@ -8,14 +8,10 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union, Set # <<< Thêm Set
 
 # Relative import
-try:
-    from .. import utils
-    from .embeds_user import create_generic_leaderboard_embed
-except ImportError:
-    import utils
-    # from embeds_user import create_generic_leaderboard_embed # Giữ comment nếu vẫn có thể lỗi import vòng
-    pass
-
+# Sử dụng import tuyệt đối cho utils
+import utils
+# Giữ lại relative import cho cùng thư mục
+from .embeds_user import create_generic_leaderboard_embed
 log = logging.getLogger(__name__)
 
 # --- Constants ---

@@ -290,6 +290,9 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
         try:
             user_has_thank_you_role = any(role in member.roles for role in thank_you_roles)
             # Tạo tin nhắn chào mừng/cảm ơn (Logic cũ giữ nguyên)
+            image_url = "https://cdn.discordapp.com/attachments/1141675354470223887/1368708955911753751/image.png?ex=6819350c&is=6817e38c&hm=2152f8ecd42616638d092986066d6123338aea5e8c485fc3153d52d2f9ede2d5&" # <--- Lưu URL ảnh (đã bỏ & thừa)
+
+            # Tạo tin nhắn chào mừng/cảm ơn
             if user_has_thank_you_role:
                 thank_you_title = f"💖 Cảm ơn bạn đã là một phần tuyệt vời của {guild.name}! 💖"
                 thank_you_body = (
@@ -301,10 +304,10 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                      f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á \n\n"
                      f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
                      f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
-                     f"https://cdn.discordapp.com/attachments/1141675354470223887/1368646110226284634/image.png?ex=6818fa84&is=6817a904&hm=dbe2d09c26353edbb85655680207578bb59e6ea7559a31a5c9b88579a583b7ad& \n\n"
                      f"# ᓚᘏᗢ"
                  )
                 messages_to_send.append(thank_you_title + "\n\n" + thank_you_body)
+                messages_to_send.append(image_url)
             else:
                  greeting_msg = (
                      f"📊 Chào cậu {member.mention}, \n\n"
@@ -316,6 +319,10 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                      f"# ᓚᘏᗢ"
                  )
                  messages_to_send.append(greeting_msg)
+                 # THÊM LINK ẢNH NHƯ TIN NHẮN RIÊNG (cho cả người không có role cảm ơn)
+                 messages_to_send.append(image_url)
+
+            # --- KẾT THÚC SỬA ĐỔI ---
 
             # Tạo Embed Hoạt Động Cá Nhân (Gọi hàm đã nâng cấp)
             personal_activity_embed = await embeds_dm.create_personal_activity_embed(member, scan_data, bot, ranking_data)

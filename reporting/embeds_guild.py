@@ -16,23 +16,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------
 
 # Relative import (Ưu tiên cách này)
-try:
-    from .. import utils
-    from .. import config
-except ImportError:
-    # --- SỬA: Loại bỏ khối fallback import phức tạp và chỉ log cảnh báo nếu cần ---
-    # Log cảnh báo rằng import tương đối thất bại, có thể dùng import tuyệt đối nếu biết đường dẫn
-    # Tuy nhiên, khi chạy như một cog, import tương đối PHẢI hoạt động.
-    # Nếu ImportError vẫn xảy ra, đó là dấu hiệu của vấn đề cấu trúc thư mục hoặc cách chạy file.
-    log.warning("ImportError khi thực hiện relative import trong embeds_guild.py. Kiểm tra cấu trúc project và cách chạy.")
-    # Cố gắng import tuyệt đối như một fallback cuối cùng (ít khả thi hơn trong cấu trúc cog)
-    try:
-        import utils
-        import config
-    except ImportError:
-        log.critical("Không thể import utils và config ngay cả với import tuyệt đối trong embeds_guild.py!")
-        # Không thể hoạt động nếu thiếu utils/config, có thể raise lỗi ở đây
-        raise
+import utils
+import config
 
 
 # --- Constants ---

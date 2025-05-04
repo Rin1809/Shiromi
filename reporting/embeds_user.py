@@ -10,12 +10,10 @@ from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
 from collections import Counter, defaultdict # Đảm bảo có defaultdict
 
-try:
-    from .. import utils
-    from .. import config
-except ImportError:
-    import utils
-    import config
+# Relative import
+# Sử dụng import tuyệt đối
+import utils
+import config
 
 log = logging.getLogger(__name__)
 

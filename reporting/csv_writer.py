@@ -11,12 +11,10 @@ import re
 from typing import List, Dict, Any, Optional, Union, Set, Tuple
 from collections import Counter, defaultdict
 
-try:
-    from .. import utils
-    from .. import config
-except ImportError:
-    import utils
-    import config
+# Sử dụng import tuyệt đối
+import utils
+import config
+
 
 log = logging.getLogger(__name__)
 
