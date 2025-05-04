@@ -92,6 +92,52 @@ async def create_filtered_emoji_reaction_usage_csv(
     except Exception as ex:
         log.error(f"‼️ LỖI khi tạo CSV sử dụng reaction (lọc) '{filename}': {ex}", exc_info=True)
 
+# --- Thêm hàm tạo CSV cho người thả reaction ---
+async def create_top_reaction_givers_csv(
+    user_reaction_given_counts: collections.Counter,
+    user_reaction_emoji_given_counts: defaultdict,
+    files_list_ref: List[discord.File],
+    filter_admins: bool = True,
+    guild: Optional[discord.Guild] = None
+):
+    if not user_reaction_given_counts:
+        log.debug("Bỏ qua tạo 'top_reaction_givers.csv': Không có dữ liệu.")
+        return
+    filename = "top_reaction_givers.csv"
+
+    admin_ids_to_filter: Optional[Set[int]] = None
+    if filter_admins and guild:
+        admin_ids_to_filter = {m.id for m in guild.members if m.guild_permissions.administrator}
+        admin_ids_to_filter.update(config.ADMIN_ROLE_IDS_FILTER)
+        if config.ADMIN_USER_ID: admin_ids_to_filter.add(config.ADMIN_USER_ID)
+
+    try:
+        log.info(f"💾 Đang tạo file CSV: {filename}...")
+        headers = ["Rank", "User ID", "Total Reactions Given (Filtered)", "Most Used Emoji Key"]
+        rows = []
+        rank = 0
+        for user_id, total_count in user_reaction_given_counts.most_common():
+            if filter_admins and admin_ids_to_filter and isinstance(user_id, int) and user_id in admin_ids_to_filter:
+                continue
+            if total_count > 0:
+                rank += 1
+                most_used_emoji_key = "N/A"
+                user_specific_counts = user_reaction_emoji_given_counts.get(user_id, Counter())
+                if user_specific_counts:
+                    try:
+                        most_used_key, _ = max(user_specific_counts.items(), key=lambda item: item[1])
+                        most_used_emoji_key = str(most_used_key)
+                    except ValueError: pass
+                rows.append([rank, user_id, total_count, most_used_emoji_key])
+
+        if not rows:
+            log.debug(f"Bỏ qua tạo '{filename}': Không có dữ liệu sau khi lọc.")
+            return
+        await _write_csv_to_list(filename, headers, rows, files_list_ref)
+    except Exception as ex:
+        log.error(f"‼️ LỖI khi tạo CSV người thả reaction '{filename}': {ex}", exc_info=True)
+# --- Kết thúc hàm mới ---
+
 
 async def create_csv_report(
     server: discord.Guild, bot: discord.Client, server_info: Dict[str, Any],
@@ -121,24 +167,24 @@ async def create_csv_report(
     user_mention_received_counts: Optional[collections.Counter] = None,
     user_reply_counts: Optional[collections.Counter] = None,
     user_reaction_received_counts: Optional[collections.Counter] = None,
+    user_reaction_given_counts: Optional[collections.Counter] = None, # Thêm mới
+    user_reaction_emoji_given_counts: Optional[defaultdict] = None, # Thêm mới
     user_other_file_counts: Optional[collections.Counter] = None,
-    user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None, # <<< THÊM MỚI
+    user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None,
 ) -> None:
     log.info("💾 Bắt đầu tạo các file CSV chính và phụ...")
     start_time = time.monotonic()
 
     # --- CSV CHÍNH ---
     try:
-        overall_custom_sticker_counts = Counter() # Placeholder, cần tính đúng
+        overall_custom_sticker_counts = Counter()
         if sticker_usage_counts and server:
              for sid_str, count in sticker_usage_counts.items():
                  if sid_str.isdigit():
-                     # Cần kiểm tra guild_id của sticker nếu có thể fetch
-                     # Tạm thời tính tất cả sticker ID số là custom nếu cần
-                     pass # Logic kiểm tra guild_id nếu fetch sticker
+                     pass
         scan_data_summary = {
             "overall_custom_emoji_content_counts": user_total_custom_emoji_content_counts,
-            "overall_custom_sticker_counts": overall_custom_sticker_counts, # Cần tính đúng
+            "overall_custom_sticker_counts": overall_custom_sticker_counts,
             "filtered_reaction_emoji_counts": filtered_reaction_emoji_counts,
         }
         await _create_server_summary_csv(server, bot, server_info, roles, files_list_ref, scan_data=scan_data_summary)
@@ -150,7 +196,7 @@ async def create_csv_report(
     try: await _create_static_voice_stage_csv(voice_channel_static_data, files_list_ref)
     except Exception as ex: log.error(f"‼️ LỖI tạo static_voice_stage_channels.csv: {ex}", exc_info=True)
 
-    try: await _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel) # Thêm most_active
+    try: await _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel, user_reaction_given_counts) # Thêm reaction_given
     except Exception as ex: log.error(f"‼️ LỖI tạo user_activity_detail.csv: {ex}", exc_info=True)
 
     try: await _create_roles_detail_csv(roles, files_list_ref)
@@ -184,6 +230,9 @@ async def create_csv_report(
     await create_leaderboard_csv(user_mention_received_counts, "top_mentioned_users.csv", "Mention Received", files_list_ref, filter_admins=False, guild=server)
     await create_leaderboard_csv(user_reply_counts, "top_repliers.csv", "Reply", files_list_ref, filter_admins=True, guild=server)
     if user_reaction_received_counts: await create_leaderboard_csv(user_reaction_received_counts, "top_reaction_received_users.csv", "Reaction Received", files_list_ref, filter_admins=False, guild=server)
+    # Thêm CSV cho người thả reaction
+    if user_reaction_given_counts and user_reaction_emoji_given_counts: await create_top_reaction_givers_csv(user_reaction_given_counts, user_reaction_emoji_given_counts, files_list_ref, filter_admins=True, guild=server)
+
     if invite_usage_counts: await create_leaderboard_csv(invite_usage_counts, "top_inviters.csv", "Invite Use", files_list_ref, filter_admins=False, guild=server)
     if sticker_usage_counts: await create_leaderboard_csv(sticker_usage_counts, "top_sticker_usage.csv", "Sticker Usage", files_list_ref, key_header="Sticker ID", filter_admins=False)
     if filtered_reaction_emoji_counts: await create_filtered_emoji_reaction_usage_csv(filtered_reaction_emoji_counts, files_list_ref)
@@ -294,13 +343,13 @@ async def _create_static_voice_stage_csv(voice_channel_static_data, files_list_r
     rows = [[vc.get('id'), vc.get('name'), vc.get('type'), vc.get('category_id'), vc.get('category'), vc.get('created_at').isoformat() if vc.get('created_at') else None, vc.get('user_limit'), utils.parse_bitrate(str(vc.get('bitrate','0')))] for vc in voice_channel_static_data]
     await _write_csv_to_list("static_voice_stage_channels.csv", headers, rows, files_list_ref)
 
-async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel):
+async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel, user_reaction_given_counts):
     headers = [
         "User ID", "Is Bot", "Message Count", "Link Count", "Image Count", "Other File Count",
         "Emoji (Content) Count", "Custom Emoji Server (Content) Count",
         "Sticker Sent Count", "Mention Given Count", "Distinct Mention Given Count",
-        "Mention Received Count", "Reply Count", "Reaction Received Count",
-        "Distinct Channels Messaged", "Most Active Location ID", "Most Active Location Msg Count", # <<< THÊM 2 CỘT
+        "Mention Received Count", "Reply Count", "Reaction Received Count (Filtered)", "Reaction Given Count (Filtered)", # Cập nhật header
+        "Distinct Channels Messaged", "Most Active Location ID", "Most Active Location Msg Count",
         "First Seen UTC", "Last Seen UTC", "Activity Span (s)"
     ]
     rows = []
@@ -310,9 +359,10 @@ async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct
         distinct_mentions_given = len(data.get('distinct_mentions_set', set()))
         distinct_channels = user_distinct_channel_counts.get(user_id, 0)
         custom_emoji_content_count = user_total_custom_emoji_content_counts.get(user_id, 0)
-        most_active_data = user_most_active_channel.get(user_id) if user_most_active_channel else None # <<< LẤY DỮ LIỆU
+        most_active_data = user_most_active_channel.get(user_id) if user_most_active_channel else None
         most_active_id = most_active_data[0] if most_active_data else None
         most_active_count = most_active_data[1] if most_active_data else 0
+        reaction_given_count = user_reaction_given_counts.get(user_id, 0) if user_reaction_given_counts else 0
 
         rows.append([
             user_id, data.get('is_bot', False), data.get('message_count', 0),
@@ -321,8 +371,8 @@ async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct
             data.get('sticker_count', 0),
             data.get('mention_given_count', 0), distinct_mentions_given,
             data.get('mention_received_count', 0), data.get('reply_count', 0),
-            data.get('reaction_received_count', 0),
-            distinct_channels, most_active_id, most_active_count, # <<< THÊM VÀO HÀNG
+            data.get('reaction_received_count', 0), reaction_given_count, # Thêm cột mới
+            distinct_channels, most_active_id, most_active_count,
             first_seen.isoformat() if first_seen else None,
             last_seen.isoformat() if last_seen else None,
             round(activity_span_secs, 2)

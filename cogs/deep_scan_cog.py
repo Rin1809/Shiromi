@@ -43,7 +43,6 @@ class ServerDeepScan(commands.Cog):
         overall_start_time = discord.utils.utcnow()
         e = lambda name: utils.get_emoji(name, self.bot)
 
-        # <<< FIX: Khởi tạo scan_data đầy đủ các keys mới >>>
         scan_data: Dict[str, Any] = {
             "server": ctx.guild, "bot": self.bot, "ctx": ctx,
             "start_time_cmd": start_time_cmd, "overall_start_time": overall_start_time,
@@ -59,12 +58,14 @@ class ServerDeepScan(commands.Cog):
                 'link_count': 0, 'image_count': 0, 'other_file_count': 0,
                 'emoji_count': 0, 'sticker_count': 0, 'mention_given_count': 0,
                 'mention_received_count': 0, 'reply_count': 0, 'reaction_received_count': 0,
+                'reaction_given_count': 0, # Thêm mới
                 'channels_messaged_in': set(),
                 'distinct_mentions_set': set(),
                 'activity_span_seconds': 0.0,
             }),
             "overall_total_message_count": 0,
-            "overall_total_reaction_count": 0,
+            "overall_total_reaction_count": 0, # Tổng reaction thô
+            "overall_total_filtered_reaction_count": 0, # Tổng reaction đã lọc
             "processed_channels_count": 0,
             "processed_threads_count": 0,
             "skipped_threads_count": 0,
@@ -73,8 +74,8 @@ class ServerDeepScan(commands.Cog):
             "channel_keyword_counts": defaultdict(Counter),
             "thread_keyword_counts": defaultdict(Counter),
             "user_keyword_counts": defaultdict(Counter),
-            "reaction_emoji_counts": Counter(),
-            "filtered_reaction_emoji_counts": Counter(),
+            "reaction_emoji_counts": Counter(), # Tổng reaction thô theo emoji
+            "filtered_reaction_emoji_counts": Counter(), # Reaction đã lọc theo emoji
             "sticker_usage_counts": Counter(),
             "overall_custom_sticker_counts": Counter(),
             "invite_usage_counts": Counter(),
@@ -90,6 +91,8 @@ class ServerDeepScan(commands.Cog):
             "user_mention_received_counts": Counter(),
             "user_reply_counts": Counter(),
             "user_reaction_received_counts": Counter(),
+            "user_reaction_given_counts": Counter(), # Thêm mới: Reaction user đã thả
+            "user_reaction_emoji_given_counts": defaultdict(Counter), # Thêm mới: {user_id: {emoji_key: count}}
             "user_thread_creation_counts": Counter(),
             "tracked_role_grant_counts": Counter(), # {(user_id, role_id): count}
             "user_distinct_channel_counts": Counter(), # {user_id: count}
@@ -97,9 +100,7 @@ class ServerDeepScan(commands.Cog):
             "user_most_active_channel": {}, # {user_id: (location_id, count)}
             "user_activity_message_counts": Counter(), # {user_id: total_message_count}
             "user_total_custom_emoji_content_counts": Counter(), # {user_id: total_custom_emoji_count}
-            # <<< THÊM: Khởi tạo counter sticker theo user >>>
             "user_sticker_id_counts": defaultdict(Counter), # {user_id: {sticker_id: count}}
-            # <<< KẾT THÚC THÊM >>>
              # Hourly Activity Counters
             "server_hourly_activity": Counter(), # {hour: count}
             "channel_hourly_activity": defaultdict(Counter), # {channel_id: {hour: count}}
@@ -132,7 +133,6 @@ class ServerDeepScan(commands.Cog):
             "role_change_stats": Counter(),
             "user_role_changes": defaultdict(list),
         }
-        # <<< END FIX >>>
 
         # --- Phần logic try...except...finally ---
         try:
@@ -203,7 +203,7 @@ class ServerDeepScan(commands.Cog):
 
     # --- LỆNH !test (GỬI DM CHO ADMIN) ---
     @commands.command(
-        name='test',
+        name='shiromiexp',
         aliases=['sds', 'serverdeepscan'],
         help=(
              '**(ADMIN TEST)** Thực hiện quét sâu và gửi báo cáo DM **CHỈ CHO ADMIN BOT**.\n'

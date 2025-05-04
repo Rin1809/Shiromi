@@ -56,8 +56,10 @@ async def create_json_report(
     user_mention_received_counts: Optional[collections.Counter] = None,
     user_reply_counts: Optional[collections.Counter] = None,
     user_reaction_received_counts: Optional[collections.Counter] = None,
+    user_reaction_given_counts: Optional[collections.Counter] = None, # Thêm mới
+    user_reaction_emoji_given_counts: Optional[defaultdict] = None, # Thêm mới
     user_other_file_counts: Optional[collections.Counter] = None,
-    user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None, # <<< THÊM MỚI
+    user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None,
 ) -> Optional[discord.File]:
     log.info("📄 Đang tạo báo cáo JSON...")
     report_data = {
@@ -66,7 +68,7 @@ async def create_json_report(
             "scan_end_time_utc": scan_timestamp.isoformat(),
             "bot_name": getattr(bot.user, 'name', 'Unknown Bot'),
             "bot_id": str(getattr(bot.user, 'id', 0)),
-            "report_schema_version": "1.2", # Bump version
+            "report_schema_version": "1.3", # Bump version for reaction givers
         },
         "server_info": {
             "id": str(server.id), "name": server.name, "owner_id": str(server.owner_id) if server.owner_id else None,
@@ -117,7 +119,7 @@ async def create_json_report(
     report_data["roles"] = [{"id": str(r.id), "name": r.name, "position": r.position, "color_hex": str(r.color), "is_hoisted": r.hoist, "is_mentionable": r.mentionable, "is_bot_managed": r.is_bot_managed(), "member_count_scan_end": len(r.members), "created_at_utc": r.created_at, "permissions_value": r.permissions.value} for r in roles]
 
     for user_id, data in user_activity.items():
-        most_active_data = user_most_active_channel.get(user_id) if user_most_active_channel else None # <<< LẤY DỮ LIỆU
+        most_active_data = user_most_active_channel.get(user_id) if user_most_active_channel else None
         user_json_data = {
             "is_bot": data.get('is_bot'), "message_count": data.get('message_count'),
             "link_count": data.get('link_count'), "image_count": data.get('image_count'),
@@ -128,9 +130,11 @@ async def create_json_report(
             "mention_given_count": data.get('mention_given_count'),
             "distinct_mention_given_count": len(data.get('distinct_mentions_set', set())),
             "mention_received_count": data.get('mention_received_count'),
-            "reply_count": data.get('reply_count'), "reaction_received_count": data.get('reaction_received_count'),
+            "reply_count": data.get('reply_count'),
+            "reaction_received_count": data.get('reaction_received_count'),
+            "reaction_given_count": data.get('reaction_given_count'), # Thêm mới
             "distinct_channels_messaged": len(data.get('channels_messaged_in', set())),
-            "most_active_location": { # <<< THÊM VÀO JSON
+            "most_active_location": {
                 "location_id": str(most_active_data[0]) if most_active_data else None,
                 "message_count": most_active_data[1] if most_active_data else 0
             },
@@ -159,13 +163,18 @@ async def create_json_report(
     lb["custom_emoji_server_content_users"] = user_total_custom_emoji_content_counts; lb["sticker_senders"] = user_sticker_counts
     lb["mention_givers"] = user_mention_given_counts; lb["mention_receivers"] = user_mention_received_counts
     lb["repliers"] = user_reply_counts; lb["reaction_receivers"] = user_reaction_received_counts
+    lb["reaction_givers"] = user_reaction_given_counts # Thêm mới
+    # Chuyển đổi defaultdict(Counter) thành dict(dict) cho JSON
+    if user_reaction_emoji_given_counts:
+        lb["reaction_emoji_given_by_user"] = {str(uid): dict(counts) for uid, counts in user_reaction_emoji_given_counts.items()}
+    else: lb["reaction_emoji_given_by_user"] = {}
+
     lb["invite_creators_by_uses"] = invite_usage_counts; lb["filtered_emoji_reaction_usage"] = filtered_reaction_emoji_counts
     lb["sticker_id_usage"] = sticker_usage_counts; lb["thread_creators"] = user_thread_creation_counts
     lb["distinct_channel_users"] = user_distinct_channel_counts
 
     if oldest_members_data: report_data["top_oldest_members"] = [{"user_id": str(d.get('id')), "display_name": d.get('display_name'), "joined_at_utc": d.get('joined_at')} for d in oldest_members_data]
     if tracked_role_grant_counts:
-        # Chuyển đổi Counter với key tuple thành cấu trúc dict lồng nhau nếu muốn
         grants_by_user = defaultdict(dict)
         for (user_id, role_id), count in tracked_role_grant_counts.items():
             grants_by_user[str(user_id)][str(role_id)] = count
@@ -192,5 +201,3 @@ async def create_json_report(
     except Exception as ex:
         log.error(f"‼️ LỖI không xác định khi tạo báo cáo JSON: {ex}", exc_info=True)
         return None
-
-# --- END OF FILE reporting/json_writer.py ---

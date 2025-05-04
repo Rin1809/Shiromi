@@ -24,10 +24,8 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
     """Xử lý một tin nhắn, cập nhật scan_data."""
     target_keywords = scan_data["target_keywords"]
     can_scan_reactions = scan_data.get("can_scan_reactions", False)
-    # <<< FIX: Lấy cache emoji/sticker đã khởi tạo >>>
-    server_emojis_cache: Dict[int, discord.Emoji] = scan_data.get("server_emojis_cache", {}) # Lấy từ cache
-    server_sticker_ids_cache: Set[int] = scan_data.get("server_sticker_ids_cache", set()) # Lấy từ cache
-    # <<< END FIX >>>
+    server_emojis_cache: Dict[int, discord.Emoji] = scan_data.get("server_emojis_cache", {})
+    server_sticker_ids_cache: Set[int] = scan_data.get("server_sticker_ids_cache", set())
 
     timestamp = message.created_at
     if not message.author or message.is_system(): # Bỏ qua tin nhắn hệ thống và webhook
@@ -59,17 +57,14 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
     # Đếm tin nhắn cho user trong kênh/luồng này
     scan_data["user_channel_message_counts"][author_id][location_id] += 1
 
-    # <<< FIX: Thu thập dữ liệu giờ >>>
+    # Thu thập dữ liệu giờ
     hour = timestamp.hour
-    # Cập nhật counter giờ cho server
     scan_data.setdefault("server_hourly_activity", Counter())[hour] += 1
-    # Cập nhật counter giờ cho kênh/luồng
     is_thread = isinstance(message.channel, discord.Thread)
     if is_thread:
         scan_data.setdefault("thread_hourly_activity", defaultdict(Counter))[location_id][hour] += 1
     else:
         scan_data.setdefault("channel_hourly_activity", defaultdict(Counter))[location_id][hour] += 1
-    # <<< END FIX >>>
 
     # --- Phân tích nội dung tin nhắn (chỉ cho user không phải bot) ---
     msg_content = message.content or ""
@@ -101,11 +96,9 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
             if custom_id_str:
                 try:
                     emoji_id = int(custom_id_str)
-                    # <<< FIX: Sử dụng server_emojis_cache đã được khởi tạo >>>
                     if emoji_id in server_emojis_cache:
                         custom_emoji_content_counter_user[emoji_id] += 1
                         overall_custom_emoji_counter[emoji_id] += 1
-                    # <<< END FIX >>>
                 except ValueError:
                     pass
 
@@ -119,19 +112,14 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
         user_data['sticker_count'] = user_data.get('sticker_count', 0) + sticker_count
         overall_custom_sticker_counter = scan_data.setdefault("overall_custom_sticker_counts", Counter())
         sticker_usage_counter = scan_data.setdefault("sticker_usage_counts", Counter())
-        # <<< THÊM: Lấy hoặc tạo counter sticker theo user >>>
         user_sticker_id_counter = scan_data.setdefault("user_sticker_id_counts", defaultdict(Counter))[author_id]
 
         for sticker_item in message.stickers:
              sticker_id_str = str(sticker_item.id)
              sticker_usage_counter[sticker_id_str] += 1
-             # <<< THÊM: Cập nhật counter sticker theo user >>>
              user_sticker_id_counter[sticker_id_str] += 1
-             # <<< KẾT THÚC THÊM >>>
-             # <<< FIX: Sử dụng server_sticker_ids_cache đã được khởi tạo >>>
              if sticker_item.id in server_sticker_ids_cache:
                   overall_custom_sticker_counter[sticker_item.id] += 1
-             # <<< END FIX >>>
 
         # Đếm mention (chỉ user, không bot)
         non_bot_mentions = [m for m in message.mentions if not m.bot]
@@ -174,49 +162,65 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
     # --- Đếm reactions (nếu bật và có quyền) ---
     if can_scan_reactions and message.reactions:
         try:
-            msg_react_count = 0
-            filtered_reaction_counter = scan_data.setdefault("filtered_reaction_emoji_counts", Counter())
-            reaction_total_counter = scan_data.setdefault("reaction_emoji_counts", Counter()) # Counter tổng
+            msg_react_received_count = 0 # Bao nhiêu reaction nhận được (kể cả bot thả)
+            msg_react_filtered_count = 0 # Bao nhiêu reaction nhận được (đã lọc)
 
-            for reaction in message.reactions: # Lặp qua từng reaction object
-                count = reaction.count
-                if count <= 0: continue # Bỏ qua nếu count không hợp lệ
-                msg_react_count += count
+            filtered_reaction_emoji_counter = scan_data.setdefault("filtered_reaction_emoji_counts", Counter())
+            reaction_total_emoji_counter = scan_data.setdefault("reaction_emoji_counts", Counter())
+            user_react_given_counter = scan_data.setdefault("user_reaction_given_counts", Counter())
+            user_react_emoji_given_counter = scan_data.setdefault("user_reaction_emoji_given_counts", defaultdict(Counter))
 
-                emoji = reaction.emoji # Lấy đối tượng emoji/unicode string từ reaction
-                emoji_key_for_filtered: Optional[Union[int, str]] = None # Key dùng cho counter đã lọc
+            for reaction in message.reactions:
+                react_count = reaction.count # Số lượt thả của reaction này
+                if react_count <= 0: continue
+
+                emoji = reaction.emoji
+                emoji_key_for_filtered: Optional[Union[int, str]] = None
                 is_custom_server_emoji = False
                 is_allowed_unicode = False
 
                 if isinstance(emoji, discord.Emoji):
-                    # <<< FIX: Sử dụng server_emojis_cache để kiểm tra >>>
-                    if emoji.id in server_emojis_cache: # Kiểm tra xem có phải của server này không
+                    if emoji.id in server_emojis_cache:
                         is_custom_server_emoji = True
-                        emoji_key_for_filtered = emoji.id # Dùng ID làm key
-                    # <<< END FIX >>>
-                else: # Trường hợp còn lại, coi như là Unicode (có thể là str hoặc PartialEmoji)
-                    emoji_str = str(emoji) # Lấy dạng string của emoji
-                    if emoji_str in config.REACTION_UNICODE_EXCEPTIONS:
+                        emoji_key_for_filtered = emoji.id
+                elif isinstance(emoji, str): # Chỉ xử lý string unicode
+                    if emoji in config.REACTION_UNICODE_EXCEPTIONS:
                         is_allowed_unicode = True
-                        emoji_key_for_filtered = emoji_str # Dùng ký tự unicode làm key
+                        emoji_key_for_filtered = emoji
 
-                # Thêm vào counter đã lọc nếu thỏa mãn điều kiện
-                if is_custom_server_emoji or is_allowed_unicode:
-                    if emoji_key_for_filtered is not None:
-                        filtered_reaction_counter[emoji_key_for_filtered] += count
+                # Thêm vào counter tổng thô (luôn luôn)
+                reaction_total_emoji_counter[str(emoji)] += react_count
+                msg_react_received_count += react_count
 
-                # Luôn thêm vào counter tổng (dùng string để nhất quán key)
-                reaction_total_counter[str(emoji)] += count
+                is_filtered_reaction = is_custom_server_emoji or is_allowed_unicode
 
-            # Cập nhật tổng reaction count (có thể cần key này ở chỗ khác)
-            if "overall_total_reaction_count" not in scan_data:
-                scan_data["overall_total_reaction_count"] = 0
-            scan_data["overall_total_reaction_count"] += msg_react_count
+                # Nếu là reaction được lọc
+                if is_filtered_reaction and emoji_key_for_filtered is not None:
+                    msg_react_filtered_count += react_count
+                    filtered_reaction_emoji_counter[emoji_key_for_filtered] += react_count
+
+                    # Đếm người thả reaction (chỉ cho reaction đã lọc)
+                    try:
+                        async for user in reaction.users():
+                            if user and not user.bot: # Chỉ đếm user thật
+                                user_id = user.id
+                                user_react_given_counter[user_id] += 1
+                                user_react_emoji_given_counter[user_id][emoji_key_for_filtered] += 1
+                                # Cập nhật vào user_activity của người thả
+                                scan_data["user_activity"][user_id]['reaction_given_count'] = user_react_given_counter[user_id]
+
+                    except Exception as user_fetch_err:
+                        log.warning(f"Lỗi lấy user thả reaction '{emoji}' msg {message.id}: {user_fetch_err}")
+
+            # Cập nhật tổng reaction thô và đã lọc
+            scan_data["overall_total_reaction_count"] = scan_data.get("overall_total_reaction_count", 0) + msg_react_received_count
+            scan_data["overall_total_filtered_reaction_count"] = scan_data.get("overall_total_filtered_reaction_count", 0) + msg_react_filtered_count
 
             # Đếm reaction nhận được (chỉ cho user)
             if not is_bot:
                 user_react_received_counter = scan_data.setdefault("user_reaction_received_counts", Counter())
-                user_react_received_counter[author_id] += msg_react_count
+                # Chỉ cộng số reaction đã lọc vào đây để BXH nhất quán
+                user_react_received_counter[author_id] += msg_react_filtered_count
                 user_data['reaction_received_count'] = user_react_received_counter[author_id]
 
         except AttributeError as attr_err:
@@ -269,7 +273,6 @@ async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
         scan_data["status_message"] = status_message
 
         try:
-            # <<< DEBUG: Thêm log kiểm tra kênh voice >>>
             if isinstance(channel, discord.VoiceChannel):
                 log.debug(f"Attempting to get history for VOICE channel #{channel.name} ({channel.id})")
 
@@ -277,7 +280,6 @@ async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
             messages_found_in_voice = 0 # Biến đếm tạm
 
             async for message in message_iterator:
-                # <<< DEBUG: Log khi tìm thấy tin nhắn trong kênh voice >>>
                 if isinstance(channel, discord.VoiceChannel):
                     messages_found_in_voice += 1
                     if messages_found_in_voice % 100 == 0: # Log mỗi 100 tin
@@ -296,7 +298,6 @@ async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
                     scan_data["status_message"] = status_message
                     last_status_update_time = now
 
-            # <<< DEBUG: Log kết quả cuối cùng cho kênh voice >>>
             if isinstance(channel, discord.VoiceChannel):
                 log.info(f"  Finished scanning VOICE channel #{channel.name}. Total messages found: {messages_found_in_voice}")
 
@@ -575,13 +576,14 @@ async def _update_channel_details_after_scan(
     filtered_channel_reaction_count = None
     if config.ENABLE_REACTION_SCAN:
         # Tạm thời lấy tổng reactions đã lọc toàn server vì chưa có counter reaction theo kênh
-        filtered_channel_reaction_count = sum(scan_data.get("filtered_reaction_emoji_counts", Counter()).values())
         # TODO: Nếu cần reaction theo kênh, cần thêm logic đếm riêng trong _process_message
+        # Hiện tại chưa có nên để là None
+        pass
 
     # Cập nhật detail_entry
     update_data = {
         "message_count": channel_message_count,
-        "reaction_count": filtered_channel_reaction_count,
+        "reaction_count": filtered_channel_reaction_count, # Sẽ là None nếu chưa có logic đếm theo kênh
         "duration_seconds": round(channel_scan_duration.total_seconds(), 2),
         "topic": channel_topic,
         "nsfw": channel_nsfw_str,
@@ -666,7 +668,7 @@ def _create_progress_embed(
     status_embed.add_field(name="Dự Kiến Xong", value=utils.format_discord_time(estimated_completion_time, 'R'), inline=True)
 
     if scan_data.get("can_scan_reactions", False):
-        filtered_reaction_count = sum(scan_data.get("filtered_reaction_emoji_counts", Counter()).values())
+        filtered_reaction_count = scan_data.get("overall_total_filtered_reaction_count", 0)
         status_embed.add_field(name=f"{e('reaction')} React (Lọc)", value=f"{filtered_reaction_count:,}", inline=True)
     else:
         status_embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -677,5 +679,4 @@ def _create_progress_embed(
     status_embed.set_footer(text=footer_text)
 
     return status_embed
-
 # --- END OF FILE cogs/deep_scan_helpers/scan_channels.py ---
