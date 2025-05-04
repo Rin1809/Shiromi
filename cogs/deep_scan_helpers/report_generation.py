@@ -1,6 +1,4 @@
 # --- START OF FILE reporting/report_generation.py ---
-# (Các import và hàm _send_report_embeds giữ nguyên)
-# ...
 import discord
 from discord.ext import commands
 import logging
@@ -40,19 +38,46 @@ async def _send_report_embeds(scan_data: Dict[str, Any], embed_list: List[discor
             await ctx.send(embed=embed)
             report_messages_sent += 1
             log.debug(f"  Đã gửi embed {i+1}/{len(embed_list)} cho '{type_name}'.")
-            await asyncio.sleep(1.5) # Delay nhẹ
+            await asyncio.sleep(1.6) # Delay nhẹ giữa các tin nhắn
         except discord.HTTPException as send_err:
             error_msg = f"Lỗi gửi '{type_name}' (Embed {i+1}, HTTP {send_err.status}): {send_err.text}"
             log.error(f"{e('error')} {error_msg}")
             scan_errors.append(error_msg)
-            if send_err.status == 429: retry_after = send_err.retry_after or 5.0; log.warning(f"    Bị rate limit, chờ {retry_after + config.LOG_RETRY_AFTER_BUFFER:.2f}s..."); await asyncio.sleep(retry_after + config.LOG_RETRY_AFTER_BUFFER) # Sử dụng config
-            elif send_err.status >= 500: log.warning(f"    Lỗi server Discord ({send_err.status}), chờ 5s..."); await asyncio.sleep(5.0)
-            else: log.warning(f"    Lỗi client Discord ({send_err.status}), chờ 3s..."); await asyncio.sleep(3.0)
+            if send_err.status == 429:
+                retry_after = send_err.retry_after or 5.0
+                wait_time = retry_after + config.LOG_RETRY_AFTER_BUFFER
+                log.warning(f"    Bị rate limit, chờ {wait_time:.2f}s...")
+                await asyncio.sleep(wait_time)
+            elif send_err.status >= 500:
+                log.warning(f"    Lỗi server Discord ({send_err.status}), chờ 5s...")
+                await asyncio.sleep(5.0)
+            else: # Các lỗi client khác
+                log.warning(f"    Lỗi client Discord ({send_err.status}), chờ 3s...")
+                await asyncio.sleep(3.0)
         except Exception as send_e:
             error_msg = f"Lỗi không xác định gửi '{type_name}' (Embed {i+1}): {send_e}"
             log.error(f"{e('error')} {error_msg}", exc_info=True); scan_errors.append(error_msg); await asyncio.sleep(2.0)
 
     scan_data["report_messages_sent"] = report_messages_sent
+
+# --- Hàm Helper Tạo Embed Leaderboard Chung (Dùng cho các hàm Counter đơn giản) ---
+# Hàm này chỉ dùng cho các embed nhận counter, guild, bot làm tham số chính
+async def _try_add_generic_leaderboard(embed_list, func, counter_data, **kwargs):
+    """Helper để gọi hàm tạo embed leaderboard CHUNG, bắt lỗi và thêm vào list."""
+    bot_ref = kwargs.get('bot')
+    e = lambda name: utils.get_emoji(name, bot_ref) if bot_ref else '❓'
+    try:
+        embed = await func(counter_data, **kwargs) # Gọi với counter và kwargs
+        if embed: embed_list.append(embed)
+        elif func.__name__ != 'create_error_embed':
+            log.debug(f"Hàm '{func.__name__}' không tạo ra embed (dữ liệu rỗng?).")
+    except Exception as ex:
+        err = f"Lỗi embed {func.__name__}: {ex}"
+        log.error(f"{e('error')} {err}", exc_info=True)
+        # Ghi lỗi vào scan_errors của scope cha (generate_and_send_reports)
+        if 'scan_errors' in globals() and isinstance(globals()['scan_errors'], list):
+             globals()['scan_errors'].append(err)
+        pass
 
 # --- Hàm Chính Tạo và Gửi Báo cáo CÔNG KHAI ---
 async def generate_and_send_reports(scan_data: Dict[str, Any]):
@@ -60,6 +85,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     e = lambda name: utils.get_emoji(name, bot)
+    # Lấy list scan_errors từ scan_data để cập nhật trực tiếp
     scan_errors: List[str] = scan_data["scan_errors"]
     ctx: commands.Context = scan_data["ctx"]
 
@@ -67,6 +93,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     start_time_reports = time.monotonic()
 
     # --- Chuẩn bị dữ liệu cần thiết (lấy từ scan_data) ---
+    # (Giữ nguyên)
     user_activity = scan_data["user_activity"]
     user_link_counts = scan_data.get("user_link_counts", Counter())
     user_image_counts = scan_data.get("user_image_counts", Counter())
@@ -94,19 +121,17 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     # 1. Tóm tắt Server & Hoạt động Kênh & Giờ vàng
     log.info(f"--- {e('stats')} Báo cáo Tổng quan & Kênh & Giờ vàng ---")
     server_channel_embeds = []
+    # Giữ lại _try_add_embed vì nó hoạt động tốt cho các hàm không phải leaderboard
     async def _try_add_embed(func, *args, **kwargs):
-        nonlocal server_channel_embeds # Cho phép sửa list bên ngoài
+        nonlocal server_channel_embeds
         try:
             embed = await func(*args, **kwargs)
             if embed: server_channel_embeds.append(embed)
-            # <<< ADDED: Log nếu embed không được tạo >>>
-            elif func.__name__ != 'create_error_embed': # Không log cho embed lỗi
+            elif func.__name__ != 'create_error_embed':
                 log.debug(f"Hàm '{func.__name__}' không tạo ra embed (dữ liệu rỗng?).")
-            # <<< END ADDED >>>
         except Exception as ex: error_msg = f"Lỗi embed {func.__name__}: {ex}"; log.error(f"{e('error')} {error_msg}", exc_info=True); scan_errors.append(error_msg)
 
-    # Gọi các hàm tạo embed cho nhóm 1
-    await _try_add_embed(embeds_guild.create_summary_embed, server, bot, scan_data["processed_channels_count"], scan_data["processed_threads_count"], scan_data["skipped_channels_count"], scan_data["skipped_threads_count"], scan_data["overall_total_message_count"], len(user_activity), scan_data["overall_duration"], scan_data["initial_member_status_counts"], scan_data["channel_counts"], len(scan_data["all_roles_list"]), scan_data["overall_start_time"], scan_data, ctx, scan_data.get('overall_total_reaction_count'))
+    await _try_add_embed(embeds_guild.create_summary_embed, server, bot, scan_data["processed_channels_count"], scan_data["processed_threads_count"], scan_data["skipped_channels_count"], scan_data["skipped_threads_count"], scan_data["overall_total_message_count"], len(user_activity), scan_data["overall_duration"], scan_data["initial_member_status_counts"], scan_data["channel_counts"], len(scan_data["all_roles_list"]), scan_data["overall_start_time"], scan_data, ctx=ctx, overall_total_reaction_count=scan_data.get('overall_total_reaction_count'))
     await _try_add_embed(embeds_guild.create_channel_activity_embed, guild=server, bot=bot, channel_details=channel_details, voice_channel_static_data=voice_channel_static_data)
     await _try_add_embed(embeds_guild.create_golden_hour_embed, server_hourly_activity=server_hourly_activity, channel_hourly_activity=channel_hourly_activity, thread_hourly_activity=thread_hourly_activity, guild=server, bot=bot)
 
@@ -116,79 +141,106 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     # 2. Bảng Xếp Hạng Hoạt Động & Tương Tác
     log.info(f"--- {e('members')} BXH Hoạt động & Tương tác ---")
     activity_interaction_embeds = []
-    # Hàm helper _try_add_leaderboard để dùng lại cho các BXH khác
-    async def _try_add_leaderboard(embed_list, func, counter_or_data, *args, **kwargs):
-        try:
-            embed = await func(counter_or_data, *args, **kwargs)
-            if embed: embed_list.append(embed)
-            # <<< ADDED: Log nếu embed không được tạo >>>
-            elif func.__name__ != 'create_error_embed': # Không log cho embed lỗi
-                log.debug(f"Hàm '{func.__name__}' không tạo ra embed (dữ liệu rỗng?).")
-            # <<< END ADDED >>>
-        except Exception as ex: err = f"Lỗi embed {func.__name__}: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+    kwargs_basic = {"guild": server, "bot": bot}
 
-    # Gọi các hàm tạo embed cho nhóm 2
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_active_users_embed, user_activity, guild=server, bot=bot)
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_reaction_received_users_embed, user_reaction_received_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_repliers_embed, user_reply_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_mentioned_users_embed, user_mention_received_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_mentioning_users_embed, user_mention_given_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(activity_interaction_embeds, embeds_user.create_top_distinct_channel_users_embed, user_distinct_channel_counts, guild=server, bot=bot)
+    # Sử dụng helper mới _try_add_generic_leaderboard cho các hàm nhận Counter
+    await _try_add_generic_leaderboard(activity_interaction_embeds, embeds_user.create_top_active_users_embed, user_activity, **kwargs_basic) # Hàm này nhận user_activity, không phải counter
+    await _try_add_generic_leaderboard(activity_interaction_embeds, embeds_user.create_top_reaction_received_users_embed, user_reaction_received_counts, **kwargs_basic)
+    await _try_add_generic_leaderboard(activity_interaction_embeds, embeds_user.create_top_repliers_embed, user_reply_counts, **kwargs_basic)
+    await _try_add_generic_leaderboard(activity_interaction_embeds, embeds_user.create_top_mentioned_users_embed, user_mention_received_counts, **kwargs_basic)
+    await _try_add_generic_leaderboard(activity_interaction_embeds, embeds_user.create_top_mentioning_users_embed, user_mention_given_counts, **kwargs_basic)
+    # Gọi hàm đặc biệt này trực tiếp
+    try:
+        embed = await embeds_user.create_top_distinct_channel_users_embed(scan_data, guild=server, bot=bot)
+        if embed: activity_interaction_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_distinct_channel_users_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+
     if activity_interaction_embeds:
         await _send_report_embeds(scan_data, activity_interaction_embeds, "BXH Hoạt động & Tương tác")
 
     # 3. Bảng Xếp Hạng Sáng Tạo Nội Dung
     log.info(f"--- {e('image')} BXH Sáng tạo Nội dung ---")
     content_creation_embeds = []
-    await _try_add_leaderboard(content_creation_embeds, embeds_analysis.create_filtered_reaction_embed, filtered_reaction_counts, bot=bot)
-    # <<< FIX: Truyền scan_data vào create_top_sticker_usage_embed >>>
-    await _try_add_leaderboard(content_creation_embeds, embeds_items.create_top_sticker_usage_embed, sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data)
-    # <<< END FIX >>>
-    # <<< THAY ĐỔI CÁCH GỌI 2 HÀM DƯỚI >>>
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_custom_emoji_users_embed, scan_data, guild=server, bot=bot) # Pass scan_data
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_sticker_users_embed, scan_data, guild=server, bot=bot) # Pass scan_data
-    # <<< KẾT THÚC THAY ĐỔI >>>
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_link_posters_embed, user_link_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_image_posters_embed, user_image_counts, guild=server, bot=bot)
-    await _try_add_leaderboard(content_creation_embeds, embeds_user.create_top_thread_creators_embed, user_thread_creation_counts, guild=server, bot=bot)
+
+    # Gọi trực tiếp hoặc dùng helper generic
+    try: # Hàm này đặc biệt, gọi trực tiếp
+        embed = await embeds_analysis.create_filtered_reaction_embed(filtered_reaction_counts, bot=bot)
+        if embed: content_creation_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_filtered_reaction_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    try: # Hàm này đặc biệt, gọi trực tiếp
+        embed = await embeds_items.create_top_sticker_usage_embed(sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data)
+        if embed: content_creation_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_sticker_usage_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    try: # Hàm này đặc biệt, gọi trực tiếp
+        embed = await embeds_user.create_top_custom_emoji_users_embed(scan_data, guild=server, bot=bot)
+        if embed: content_creation_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_custom_emoji_users_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    try: # Hàm này đặc biệt, gọi trực tiếp
+        embed = await embeds_user.create_top_sticker_users_embed(scan_data, guild=server, bot=bot)
+        if embed: content_creation_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_sticker_users_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    # Dùng helper generic cho các hàm còn lại
+    await _try_add_generic_leaderboard(content_creation_embeds, embeds_user.create_top_link_posters_embed, user_link_counts, **kwargs_basic)
+    await _try_add_generic_leaderboard(content_creation_embeds, embeds_user.create_top_image_posters_embed, user_image_counts, **kwargs_basic)
+    await _try_add_generic_leaderboard(content_creation_embeds, embeds_user.create_top_thread_creators_embed, user_thread_creation_counts, **kwargs_basic)
+
     if content_creation_embeds:
         await _send_report_embeds(scan_data, content_creation_embeds, "BXH Sáng tạo Nội dung")
 
-    # 4. Bảng Xếp Hạng Danh Hiệu Đặc Biệt
+    # 4. Bảng Xếp Hạng Danh Hiệu Đặc Biệt (Gọi trực tiếp)
     log.info(f"--- {e('crown')} BXH Danh hiệu Đặc biệt ---")
-    tracked_role_embeds = [] # Khởi tạo list riêng
-    # Gọi trực tiếp hàm tạo embed danh hiệu (vì nó trả về list)
+    tracked_role_embeds = []
     try:
          temp_tracked_embeds = await embeds_analysis.create_tracked_role_grant_leaderboards(tracked_role_grant_counts, server, bot)
          if temp_tracked_embeds:
-              tracked_role_embeds.extend(temp_tracked_embeds) # Thêm vào list
-         # <<< ADDED: Log nếu embed không được tạo >>>
-         elif config.TRACKED_ROLE_GRANT_IDS: # Chỉ log nếu có cấu hình role
+              tracked_role_embeds.extend(temp_tracked_embeds)
+         elif config.TRACKED_ROLE_GRANT_IDS:
               log.debug(f"Hàm 'create_tracked_role_grant_leaderboards' không tạo ra embed (dữ liệu rỗng?).")
-         # <<< END ADDED >>>
     except Exception as ex: error_msg = f"Lỗi embed BXH danh hiệu: {ex}"; log.error(f"{e('error')} {error_msg}", exc_info=True); scan_errors.append(error_msg)
-    # Gửi list embed danh hiệu nếu có
     if tracked_role_embeds:
         await _send_report_embeds(scan_data, tracked_role_embeds, "BXH Danh hiệu Đặc biệt")
 
     # 5. Bảng Xếp Hạng Thời Gian & Tham Gia
     log.info(f"--- {e('calendar')} BXH Thời gian & Tham gia ---")
     time_join_embeds = []
-    await _try_add_leaderboard(time_join_embeds, embeds_user.create_top_oldest_members_embed, oldest_members_data, bot=bot)
-    await _try_add_leaderboard(time_join_embeds, embeds_user.create_top_activity_span_users_embed, user_activity, guild=server, bot=bot)
-    await _try_add_leaderboard(time_join_embeds, embeds_user.create_top_booster_embed, boosters, bot=bot, scan_end_time=scan_data['scan_end_time'])
+
+    # <<< START SỬA: Gọi trực tiếp các hàm này >>>
+    try: # oldest members
+        embed = await embeds_user.create_top_oldest_members_embed(oldest_members_data, scan_data=scan_data, bot=bot)
+        if embed: time_join_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_oldest_members_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    try: # activity span
+        embed = await embeds_user.create_top_activity_span_users_embed(user_activity, guild=server, bot=bot)
+        if embed: time_join_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_activity_span_users_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+
+    try: # booster
+        embed = await embeds_user.create_top_booster_embed(boosters, bot=bot, scan_end_time=scan_data['scan_end_time'])
+        if embed: time_join_embeds.append(embed)
+    except Exception as ex: err = f"Lỗi embed create_top_booster_embed: {ex}"; log.error(f"{e('error')} {err}", exc_info=True); scan_errors.append(err)
+    # <<< END SỬA >>>
+
     if time_join_embeds:
         await _send_report_embeds(scan_data, time_join_embeds, "BXH Thời gian & Tham gia")
 
-    # 6. Báo cáo Tóm tắt Lỗi
+    # 6. Báo cáo Tóm tắt Lỗi (Gọi trực tiếp)
     log.info(f"--- {e('warning')} Báo cáo Lỗi ---")
-    error_embed_list = [] # Tạo list riêng
-    await _try_add_embed(embeds_analysis.create_error_embed, scan_errors, bot) # Gọi helper để thêm vào error_embed_list
-    if error_embed_list: # Chỉ gửi nếu embed lỗi được tạo
+    error_embed_list = []
+    try:
+        embed = await embeds_analysis.create_error_embed(scan_errors, bot=bot)
+        if embed: error_embed_list.append(embed)
+    except Exception as ex: error_msg = f"Lỗi embed create_error_embed: {ex}"; log.error(f"{e('error')} {error_msg}", exc_info=True); scan_errors.append(error_msg) # Ghi vào scan_errors
+
+    if error_embed_list:
         await _send_report_embeds(scan_data, error_embed_list, "Tóm tắt Lỗi")
-    elif scan_errors: # Log nếu có lỗi nhưng embed không tạo được
+    elif scan_errors:
          log.error(f"Có {len(scan_errors)} lỗi nhưng không thể tạo embed báo cáo lỗi.")
-         # Cân nhắc gửi lỗi thô nếu cần
     else:
         log.info("Không có lỗi nào được ghi nhận trong quá trình quét.")
 

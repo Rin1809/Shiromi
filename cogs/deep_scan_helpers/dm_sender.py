@@ -300,6 +300,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                      f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á \n\n"
                      f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
                      f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
+                     f"https://cdn.discordapp.com/attachments/1141675354470223887/1368646110226284634/image.png?ex=6818fa84&is=6817a904&hm=dbe2d09c26353edbb85655680207578bb59e6ea7559a31a5c9b88579a583b7ad& \n\n"
                      f"# ᓚᘏᗢ"
                  )
                 messages_to_send.append(thank_you_title + "\n\n" + thank_you_body)
@@ -326,7 +327,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             else: log.warning(f"Không thể tạo achievements_embed cho {member.display_name}")
 
             # Thêm tin nhắn kết thúc
-            final_message = f"Đây là báo cáo tự động được tạo bởi {config.BOT_NAME}. Báo cáo này chỉ dành cho bạn. Chúc bạn một ngày vui vẻ! 🎉"
+            final_message = f"Đây là báo cáo tự động được tạo bởi {config.BOT_NAME}. Báo cáo này chỉ dành cho cậu. Chúc cậu một ngày vui vẻ! 🎉"
             messages_to_send.append(final_message)
 
             # --- Gửi DM đến target_dm_channel ---
