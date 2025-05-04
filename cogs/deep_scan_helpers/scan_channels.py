@@ -288,7 +288,7 @@ async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
                 if isinstance(channel, discord.VoiceChannel):
                     messages_found_in_voice += 1
                     if messages_found_in_voice % 100 == 0: # Log mỗi 100 tin
-                        log.debug(f"Found {messages_found_in_voice} messages in VOICE channel #{channel.name} so far.")
+                        log.debug(f"Đã duyệt {messages_found_in_voice} tin nhắn trong kênh VOICE tên #{channel.name} ")
 
                 await _process_message(message, scan_data, channel.id)
                 channel_message_count += 1
