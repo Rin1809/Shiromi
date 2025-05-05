@@ -22,10 +22,11 @@ DELAY_BETWEEN_EMBEDS = 1.8
 DELAY_ON_HTTP_ERROR = 5.0
 DELAY_ON_FORBIDDEN = 1.0
 DELAY_ON_UNKNOWN_ERROR = 3.0
+# <<< ĐỔI TÊN CONSTANT CHO RÕ NGHĨA >>>
+DELAY_AFTER_FINAL_ITEM = 1.5
 
 # --- Hàm _prepare_ranking_data giữ nguyên ---
 async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild) -> Dict[str, Dict[int, int]]:
-    # ... (Giữ nguyên toàn bộ code của hàm này) ...
     rankings: Dict[str, Dict[int, int]] = {}
     e = lambda name: utils.get_emoji(name, scan_data["bot"]) # Hàm lấy emoji
 
@@ -116,7 +117,6 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     rankings["mention_received"] = get_ranks_from_counter(scan_data.get("user_mention_received_counts"), filter_admin=False)
     rankings["mention_given"] = get_ranks_from_counter(scan_data.get("user_mention_given_counts"), filter_admin=True)
     rankings["distinct_channels"] = get_ranks_from_counter(scan_data.get("user_distinct_channel_counts"), filter_admin=True)
-    # THÊM HẠNG REACTION GIVEN
     rankings["reaction_given"] = get_ranks_from_counter(scan_data.get("user_reaction_given_counts"), filter_admin=True)
 
     # Sáng Tạo Nội Dung
@@ -162,12 +162,13 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     thank_you_role_ids: Set[int] = config.BOOSTER_THANKYOU_ROLE_IDS
     admin_user_id: Optional[int] = config.ADMIN_USER_ID
     quy_toc_anh_mapping: Dict[str, str] = config.QUY_TOC_ANH_MAPPING # Lấy mapping từ config
+    # <<< LẤY EMOJI CUỐI TỪ CONFIG >>>
+    final_dm_emoji: str = config.FINAL_DM_EMOJI
 
     is_test_mode = is_testing_mode
     log.debug(f"[DM Sender] Explicit is_testing_mode received = {is_test_mode}")
 
     # --- Lấy đối tượng admin (luôn cần nếu test mode) ---
-    # ... (Giữ nguyên code lấy admin_member, admin_dm_channel) ...
     admin_member: Optional[discord.Member] = None
     admin_dm_channel: Optional[discord.DMChannel] = None
     if is_test_mode:
@@ -197,7 +198,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
              return
 
     # --- Xác định danh sách thành viên cần xử lý ---
-    # ... (Giữ nguyên code xác định members_to_process và process_description) ...
     members_to_process: List[discord.Member] = []
     process_description = ""
     if recipient_role_id:
@@ -235,6 +235,8 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     # --- Chuẩn bị dữ liệu xếp hạng ---
     ranking_data = await _prepare_ranking_data(scan_data, guild)
 
+    # <<< XÓA PHẦN FETCH STICKER CUỐI >>>
+
     # --- Bắt đầu gửi DM ---
     sent_dm_count = 0
     failed_dm_count = 0
@@ -246,9 +248,9 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
 
         messages_to_send: List[str] = []
         embeds_to_send: List[discord.Embed] = []
+        dm_successfully_sent = False # Cờ để biết đã gửi thành công chưa
 
         # --- Xác định đích gửi DM ---
-        # ... (Giữ nguyên code xác định target_dm_channel, target_description_log, is_sending_to_admin) ...
         target_dm_channel: Optional[Union[discord.DMChannel, Any]] = None
         target_description_log = "" # Để log cho rõ
         is_sending_to_admin = False # Cờ để biết có cần thêm prefix không
@@ -344,7 +346,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             messages_to_send.append(final_message)
 
             # --- Gửi DM ---
-            # ... (Giữ nguyên code gửi DM, xử lý lỗi, delay) ...
             if not embeds_to_send and not messages_to_send:
                 log.warning(f"Không có nội dung DM để gửi cho {member.display_name}.")
                 failed_dm_count += 1
@@ -371,12 +372,28 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                             log.warning(f"Target DM channel không còn hợp lệ khi gửi embed cho {target_description_log}")
                             raise Exception("Target DM channel became invalid") # Gây lỗi
 
+                # <<< GỬI EMOJI CUỐI CÙNG (NẾU CÓ) >>>
+                if final_dm_emoji and target_dm_channel:
+                    try:
+                        log.debug(f"Đang gửi emoji cuối DM '{final_dm_emoji}' đến {target_description_log}...")
+                        await target_dm_channel.send(final_dm_emoji) # Send emoji as content
+                        await asyncio.sleep(DELAY_AFTER_FINAL_ITEM) # Dùng delay mới
+                    except discord.Forbidden:
+                        log.warning(f"  -> Không thể gửi emoji cuối DM đến {target_description_log}: Bot bị chặn?")
+                    except discord.HTTPException as emoji_err:
+                        log.warning(f"  -> Lỗi HTTP {emoji_err.status} khi gửi emoji cuối DM đến {target_description_log}: {emoji_err.text}")
+                    except Exception as emoji_e:
+                        log.warning(f"  -> Lỗi không xác định khi gửi emoji cuối DM đến {target_description_log}: {emoji_e}")
+                # <<< KẾT THÚC GỬI EMOJI >>>
+
                 sent_dm_count += 1
+                dm_successfully_sent = True # Đánh dấu đã gửi thành công
                 log.info(f"✅ Gửi báo cáo của {member.display_name} ({member.id}) thành công đến {target_description_log}")
 
             except discord.Forbidden:
                 log.warning(f"❌ Không thể gửi DM đến {target_description_log} (cho báo cáo của {member.id}): User/Admin đã chặn DM hoặc bot.")
                 failed_dm_count += 1
+                dm_successfully_sent = False
                 await asyncio.sleep(DELAY_ON_FORBIDDEN)
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Không thể gửi Test DM đến Admin. Dừng gửi DM.")
@@ -386,6 +403,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             except discord.HTTPException as dm_http_err:
                 log.error(f"❌ Lỗi HTTP {dm_http_err.status} khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_http_err.text}")
                 failed_dm_count += 1
+                dm_successfully_sent = False
                 await asyncio.sleep(DELAY_ON_HTTP_ERROR)
                 if is_test_mode and dm_http_err.status != 429: # Cho phép retry nếu chỉ là rate limit
                      log.error("LỖI NGHIÊM TRỌNG: Lỗi HTTP khi gửi Test DM đến Admin. Dừng gửi DM.")
@@ -395,6 +413,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             except Exception as dm_err:
                 log.error(f"❌ Lỗi không xác định khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_err}", exc_info=True)
                 failed_dm_count += 1
+                dm_successfully_sent = False
                 await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Lỗi không xác định khi gửi Test DM đến Admin. Dừng gửi DM.")
@@ -402,8 +421,9 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                     return
                 target_dm_channel = None # Đánh dấu channel không hợp lệ
 
-            # Delay chung giữa các user
-            await asyncio.sleep(DELAY_BETWEEN_USERS)
+            # Chỉ delay giữa các user nếu DM trước đó thành công (hoặc không phải lỗi nghiêm trọng dừng test mode)
+            if dm_successfully_sent or not is_test_mode:
+                await asyncio.sleep(DELAY_BETWEEN_USERS)
 
         except Exception as user_proc_err:
             log.error(f"Lỗi nghiêm trọng khi xử lý dữ liệu DM cho {member.display_name} ({member.id}): {user_proc_err}", exc_info=True)
@@ -411,7 +431,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
 
     # --- Log kết thúc ---
-    # ... (Giữ nguyên code log kết quả gửi DM) ...
     log.info(f"--- {e('success')} Hoàn tất gửi DM báo cáo ---")
     mode_str = "Test Mode (gửi đến Admin)" if is_test_mode else "Normal Mode"
     log.info(f"Chế độ: {mode_str}")

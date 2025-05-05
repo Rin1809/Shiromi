@@ -13,7 +13,7 @@ import asyncio
 import math
 import unicodedata
 import collections
-import config
+import config # Import config để dùng các biến mới nếu cần
 
 log = logging.getLogger(__name__)
 
@@ -239,6 +239,21 @@ async def _fetch_sticker_dict(sticker_ids: List[int], bot: Union[discord.Client,
         elif isinstance(res, Exception): pass
     return sticker_cache
 
+async def fetch_sticker_object(sticker_id: Optional[int], bot: discord.Client, guild: Optional[discord.Guild] = None) -> Optional[discord.Sticker]:
+    """Fetch sticker object và kiểm tra tính hợp lệ."""
+    if not sticker_id: return None
+    try:
+        sticker = await bot.fetch_sticker(sticker_id)
+        if not sticker: return None
+        if not sticker.available: log.warning(f"Sticker {sticker_id} không available."); return None
+        if isinstance(sticker, discord.GuildSticker):
+            if guild and sticker.guild_id == guild.id: return sticker
+            else: log.warning(f"Sticker {sticker_id} thuộc server khác hoặc guild không xác định."); return None
+        else: return sticker # Sticker mặc định (nếu fetch được)
+    except discord.NotFound: log.warning(f"Không tìm thấy sticker ID {sticker_id}."); return None
+    except discord.HTTPException as e: log.warning(f"Lỗi HTTP khi fetch sticker {sticker_id}: {e.status}"); return None
+    except Exception as e: log.error(f"Lỗi không xác định khi fetch sticker {sticker_id}: {e}", exc_info=True); return None
+
 local_timezone_offset_hours: Optional[int] = None
 def get_local_timezone_offset() -> int:
     global local_timezone_offset_hours
@@ -378,7 +393,7 @@ async def create_user_leaderboard_embed(
              if isinstance(count_val, (int, float)):
                  if minimum_value is None or (count_val >= minimum_value if not sort_ascending else count_val <= minimum_value):
                       processed_users.append((uid, count_val))
-             elif isinstance(count_val, str):
+             elif isinstance(count_val, str): # Cho phép giá trị string (ví dụ: thời gian đã format)
                  if minimum_value is None: processed_users.append((uid, count_val))
     elif isinstance(counts, dict) and value_key:
         temp_list = []
@@ -435,12 +450,14 @@ async def create_user_leaderboard_embed(
         secondary_info = None; tertiary_info_final = None
         if secondary_info_getter:
             try:
+                # Chuyển data source (counts) vào getter
                 result = secondary_info_getter(user_id, counts)
                 if asyncio.iscoroutine(result): secondary_info = await result
                 else: secondary_info = result
             except Exception as e_sec: log.warning(f"Lỗi secondary_info_getter '{title}' {user_id}: {e_sec}")
         if tertiary_info_getter:
             try:
+                # Chuyển data source (counts) vào getter
                 result = tertiary_info_getter(user_id, counts)
                 if asyncio.iscoroutine(result): tertiary_info_final = await result
                 else: tertiary_info_final = result
@@ -459,7 +476,8 @@ async def create_user_leaderboard_embed(
     footer_text = ""; footer_add = ""
     if tertiary_info_getter:
         try:
-            result = tertiary_info_getter(None, None)
+            # Chuyển data source (counts) vào getter
+            result = tertiary_info_getter(None, counts)
             if asyncio.iscoroutine(result): footer_text = await result
             else: footer_text = result
         except Exception: pass
@@ -467,4 +485,5 @@ async def create_user_leaderboard_embed(
     final_footer = f"{footer_add} | {footer_text}" if footer_add and footer_text else (footer_add or footer_text)
     if final_footer: embed.set_footer(text=final_footer.strip(" | "))
     return embed
+
 # --- END OF FILE utils.py ---

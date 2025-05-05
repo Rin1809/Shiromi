@@ -31,6 +31,15 @@ def _parse_unicode_list(env_var_name: str) -> Set[str]:
         return set()
     return {item.strip() for item in emoji_str.split(',') if item.strip()}
 
+def _parse_id(env_var_name: str) -> Optional[int]:
+    """Phân tích một ID đơn từ biến môi trường."""
+    id_str = os.getenv(env_var_name)
+    if id_str and id_str.isdigit():
+        return int(id_str)
+    elif id_str:
+        log.warning(f"Giá trị không hợp lệ cho ID trong biến môi trường '{env_var_name}'. Phải là một số.")
+    return None
+
 # --- Hàm đọc mapping ảnh quý tộc ---
 QUY_TOC_ANH_FILE = "quy_toc_anh.json" # Tên file cấu hình
 
@@ -102,6 +111,20 @@ log.info(f"IDs Role Admin bổ sung cần lọc khỏi BXH: {ADMIN_ROLE_IDS_FILT
 # --- Tải mapping ảnh quý tộc ---
 QUY_TOC_ANH_MAPPING: Dict[str, str] = _load_quy_toc_anh_mapping()
 # -----------------------------
+
+# --- Cấu hình Kênh Báo cáo và Sticker/Emoji ---
+REPORT_CHANNEL_ID: Optional[int] = _parse_id("REPORT_CHANNEL_ID")
+log.info(f"ID Kênh gửi báo cáo: {REPORT_CHANNEL_ID}" if REPORT_CHANNEL_ID else "Gửi báo cáo vào kênh gốc.")
+INTERMEDIATE_STICKER_ID: Optional[int] = _parse_id("INTERMEDIATE_STICKER_ID") # Sticker A
+log.info(f"ID Sticker trung gian (A): {INTERMEDIATE_STICKER_ID}" if INTERMEDIATE_STICKER_ID else "Không có sticker trung gian (A).")
+LEAST_STICKER_ID: Optional[int] = _parse_id("LEAST_STICKER_ID") # Sticker B
+log.info(f"ID Sticker 'Ít Nhất' (B): {LEAST_STICKER_ID}" if LEAST_STICKER_ID else "Không có sticker 'ít nhất' (B).")
+MOST_STICKER_ID: Optional[int] = _parse_id("MOST_STICKER_ID") # Sticker C
+log.info(f"ID Sticker 'Nhiều Nhất' (C): {MOST_STICKER_ID}" if MOST_STICKER_ID else "Không có sticker 'nhiều nhất' (C).")
+# <<< THAY THẾ DÒNG STICKER CUỐI DM >>>
+FINAL_DM_EMOJI: str = os.getenv("FINAL_DM_EMOJI", "🎉") # Emoji cuối DM, mặc định là 🎉
+log.info(f"Emoji cuối DM: {FINAL_DM_EMOJI}")
+# -----------------------------------------
 
 # --- Cấu hình Audit Log Actions ---
 AUDIT_LOG_ACTIONS_TO_TRACK_STR = os.getenv("AUDIT_LOG_ACTIONS_TO_TRACK")
