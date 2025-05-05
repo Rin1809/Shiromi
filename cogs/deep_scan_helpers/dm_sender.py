@@ -395,7 +395,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 log.error(f"❌ Lỗi không xác định khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_err}", exc_info=True)
                 failed_dm_count += 1
                 await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
-                # Nếu là test mode và lỗi lạ -> dừng hẳn
+                # Nếu là test mode và lỗi lạ -> dừng hẳn 
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Lỗi không xác định khi gửi Test DM đến Admin. Dừng gửi DM.")
                     scan_data["scan_errors"].append("Test DM thất bại: Lỗi không xác định khi gửi đến Admin.")

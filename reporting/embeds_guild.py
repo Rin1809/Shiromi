@@ -2,7 +2,7 @@
 import discord
 import datetime
 import math
-import logging # <--- Di chuyển import logging lên đầu
+import logging
 import collections
 import time
 from typing import List, Dict, Any, Optional, Union
@@ -11,14 +11,10 @@ from collections import Counter, defaultdict
 import asyncio
 import re
 
-# --- SỬA: Định nghĩa log NGAY ĐẦU FILE ---
 log = logging.getLogger(__name__)
-# ---------------------------------------
 
-# Relative import (Ưu tiên cách này)
 import utils
 import config
-
 
 # --- Constants ---
 VOICE_CHANNELS_PER_EMBED = 20
@@ -26,9 +22,9 @@ FIRST_MESSAGES_LIMIT = 10
 FIRST_MESSAGES_CONTENT_PREVIEW = 100
 GOLDEN_HOUR_INTERVAL = 3
 GOLDEN_HOUR_TOP_CHANNELS = 5
-CHANNEL_ACTIVITY_LIMIT = 10 # Giới hạn cho top/least kênh
-UMBRA_HOUR_INTERVAL = 3 # Có thể dùng chung hoặc riêng với Golden Hour
-UMBRA_HOUR_TOP_CHANNELS = 5 # Giới hạn kênh giờ âm
+CHANNEL_ACTIVITY_LIMIT = 10
+UMBRA_HOUR_INTERVAL = 3
+UMBRA_HOUR_TOP_CHANNELS = 5
 
 # --- Embed Creation Functions ---
 
@@ -44,16 +40,15 @@ async def create_summary_embed(
     overall_duration: datetime.timedelta,
     initial_member_status_counts: collections.Counter,
     channel_counts: collections.Counter,
-    all_roles_count: int, # Sử dụng trực tiếp số role đã đếm
+    all_roles_count: int,
     start_time: datetime.datetime,
     scan_data: Dict[str, Any],
     ctx: Optional[commands.Context] = None,
-    overall_total_reaction_count: Optional[int] = None # Đổi tên thành count thôi
+    overall_total_reaction_count: Optional[int] = None
 ) -> discord.Embed:
-    """Tạo embed tóm tắt chính thông tin server và kết quả quét (đã nâng cấp)."""
+    """Tạo embed tóm tắt chính thông tin server và kết quả quét."""
     e = lambda name: utils.get_emoji(name, bot)
 
-    # --- Chuẩn bị các giá trị hiển thị ---
     explicit_filter = str(server.explicit_content_filter).replace('_', ' ').title()
     mfa_level = "Yêu cầu (Cho Mod)" if server.mfa_level >= discord.MFALevel.require_2fa else "Không yêu cầu"
     notifications = "Chỉ @mention" if server.default_notifications == discord.NotificationLevel.only_mentions else "Tất cả tin nhắn"
@@ -76,7 +71,6 @@ async def create_summary_embed(
         f"{e('clock')} **Tổng thời gian quét:** {utils.format_timedelta(overall_duration, high_precision=True)}"
     )
 
-    # --- Tạo Embed ---
     summary_embed = discord.Embed(
         title=f"{e('star')} Tổng Quan Server: {server.name} {e('star')}",
         description=scan_summary,
@@ -86,7 +80,6 @@ async def create_summary_embed(
     if server.icon:
         summary_embed.set_thumbnail(url=server.icon.url)
 
-    # --- Thêm Fields ---
     owner = server.owner
     if not owner and server.owner_id:
         try: owner = await utils.fetch_user_data(server, server.owner_id, bot_ref=bot)
@@ -135,64 +128,93 @@ async def create_channel_activity_embed(
     guild: discord.Guild,
     bot: discord.Client,
     channel_details: List[Dict[str, Any]],
-    # voice_channel_static_data không cần dùng ở đây nữa
 ) -> Optional[discord.Embed]:
     """Tạo embed hiển thị top kênh text/voice hoạt động NHIỀU NHẤT."""
     e = lambda name: utils.get_emoji(name, bot)
     limit = CHANNEL_ACTIVITY_LIMIT
 
-    # --- Top Kênh Text (Nhiều Nhất) ---
-    top_text_channels = sorted(
-        [d for d in channel_details if d.get("processed") and d.get("type") == str(discord.ChannelType.text)],
-        key=lambda d: d.get("message_count", 0),
+    top_text_channels_data = sorted(
+        [(d.get('id'), d.get("message_count", 0))
+         for d in channel_details
+         if d.get("processed") and d.get("type") == str(discord.ChannelType.text) and d.get("message_count", 0) > 0],
+        key=lambda item: item[1],
         reverse=True
     )
-    top_text_lines = []
-    for rank, detail in enumerate(top_text_channels[:limit], 1):
-        channel = guild.get_channel(detail.get('id'))
-        mention = channel.mention if channel else f"`#{utils.escape_markdown(detail.get('name', 'Unknown'))}`"
-        top_text_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
+    top_voice_channels_data = sorted(
+        [(d.get('id'), d.get("message_count", 0))
+         for d in channel_details
+         if d.get("processed") and d.get("type") == str(discord.ChannelType.voice) and d.get("message_count", 0) > 0],
+        key=lambda item: item[1],
+        reverse=True
+    )
 
-    # --- Top Kênh Voice (Nhiều Nhất - Chat Text) ---
-    top_voice_channels = sorted(
-        [d for d in channel_details if d.get("processed") and d.get("type") == str(discord.ChannelType.voice) and d.get("message_count", 0) > 0],
-        key=lambda d: d.get("message_count", 0),
-        reverse=True
-    )
+    if not top_text_channels_data and not top_voice_channels_data:
+        log.debug("Không có dữ liệu kênh hoạt động nhiều để tạo embed.")
+        return None
+
+    async def format_channel_key(channel_id):
+        channel = guild.get_channel_or_thread(channel_id)
+        if channel:
+            type_emoji = utils.get_channel_type_emoji(channel, bot)
+            return f"{type_emoji} {utils.escape_markdown(channel.name)}"
+        return f"ID:{channel_id}"
+
+    text_chart_str = ""
+    if top_text_channels_data:
+        text_chart_str = await utils.create_vertical_text_bar_chart(
+            sorted_data=top_text_channels_data[:5],
+            key_formatter=format_channel_key,
+            top_n=5, max_chart_height=8, bar_width=1, bar_spacing=2,
+            chart_title="Top 5 Kênh Text", show_legend=True
+        )
+
+    voice_chart_str = ""
+    if top_voice_channels_data:
+         voice_chart_str = await utils.create_vertical_text_bar_chart(
+             sorted_data=top_voice_channels_data[:5],
+             key_formatter=format_channel_key,
+             top_n=5, max_chart_height=8, bar_width=1, bar_spacing=2,
+             chart_title="Top 5 Kênh Voice (Chat)", show_legend=True
+         )
+
+    top_text_lines = []
+    for rank, (channel_id, count) in enumerate(top_text_channels_data[:limit], 1):
+        channel = guild.get_channel(channel_id)
+        mention = channel.mention if channel else f"`#{utils.escape_markdown(next((d.get('name', 'Unknown') for d in channel_details if d.get('id') == channel_id), 'Unknown'))}`"
+        top_text_lines.append(f"`#{rank}`. {mention} ({count:,} tin)")
+
     top_voice_lines = []
-    if top_voice_channels:
-        for rank, detail in enumerate(top_voice_channels[:limit], 1):
-            channel = guild.get_channel(detail.get('id'))
-            mention = channel.mention if channel else f"`#{utils.escape_markdown(detail.get('name', 'Unknown'))}`"
-            top_voice_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
+    if top_voice_channels_data:
+        for rank, (channel_id, count) in enumerate(top_voice_channels_data[:limit], 1):
+            channel = guild.get_channel(channel_id)
+            mention = channel.mention if channel else f"`#{utils.escape_markdown(next((d.get('name', 'Unknown') for d in channel_details if d.get('id') == channel_id), 'Unknown'))}`"
+            top_voice_lines.append(f"`#{rank}`. {mention} ({count:,} tin)")
     else:
         if any(d.get("type") == str(discord.ChannelType.voice) and d.get("processed") for d in channel_details):
             top_voice_lines.append("*Không tìm thấy tin nhắn chat trong kênh voice.*")
-        # Bỏ trường hợp không có kênh voice quét được, vì embed ít hoạt động sẽ xử lý kênh 0 tin
-
-    # --- Tạo Embed ---
-    if not top_text_channels and not top_voice_channels:
-        log.debug("Không có dữ liệu kênh hoạt động nhiều để tạo embed.")
-        return None
 
     embed = discord.Embed(
         title=f"🔥 Top {limit} Kênh Hoạt Động Nhiều Nhất",
         color=discord.Color.green()
     )
 
+    text_field_value = (text_chart_str + "\n\n" if text_chart_str else "") + ("\n".join(top_text_lines) if top_text_lines else "*Không có dữ liệu*")
+    if len(text_field_value) > 1024: text_field_value = text_field_value[:1020] + "\n[...]"
     embed.add_field(
         name=f"{utils.get_channel_type_emoji(discord.ChannelType.text, bot)} Kênh Text",
-        value="\n".join(top_text_lines) if top_text_lines else "*Không có dữ liệu*",
+        value=text_field_value,
         inline=False
     )
+
+    voice_field_value = (voice_chart_str + "\n\n" if voice_chart_str else "") + ("\n".join(top_voice_lines) if top_voice_lines else "*Không có dữ liệu*")
+    if len(voice_field_value) > 1024: voice_field_value = voice_field_value[:1020] + "\n[...]"
     embed.add_field(
         name=f"{utils.get_channel_type_emoji(discord.ChannelType.voice, bot)} Kênh Voice (Chat Text)",
-        value="\n".join(top_voice_lines) if top_voice_lines else "*Không có dữ liệu*",
+        value=voice_field_value,
         inline=False
     )
 
     return embed
-
 
 async def create_least_channel_activity_embed(
     guild: discord.Guild,
@@ -203,11 +225,10 @@ async def create_least_channel_activity_embed(
     e = lambda name: utils.get_emoji(name, bot)
     limit = CHANNEL_ACTIVITY_LIMIT
 
-    # --- Kênh Text Ít Nhất (nhưng > 0 tin) ---
     least_text_channels = sorted(
         [d for d in channel_details if d.get("processed") and d.get("type") == str(discord.ChannelType.text) and d.get("message_count", 0) > 0],
         key=lambda d: d.get("message_count", 0),
-        reverse=False # Sắp xếp tăng dần
+        reverse=False
     )
     least_text_lines = []
     for rank, detail in enumerate(least_text_channels[:limit], 1):
@@ -215,11 +236,10 @@ async def create_least_channel_activity_embed(
         mention = channel.mention if channel else f"`#{utils.escape_markdown(detail.get('name', 'Unknown'))}`"
         least_text_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
 
-    # --- Kênh Voice Ít Nhất (Chat Text, nhưng > 0 tin) ---
     least_voice_channels = sorted(
         [d for d in channel_details if d.get("processed") and d.get("type") == str(discord.ChannelType.voice) and d.get("message_count", 0) > 0],
         key=lambda d: d.get("message_count", 0),
-        reverse=False # Sắp xếp tăng dần
+        reverse=False
     )
     least_voice_lines = []
     if least_voice_channels:
@@ -227,9 +247,7 @@ async def create_least_channel_activity_embed(
             channel = guild.get_channel(detail.get('id'))
             mention = channel.mention if channel else f"`#{utils.escape_markdown(detail.get('name', 'Unknown'))}`"
             least_voice_lines.append(f"`#{rank}`. {mention} ({detail.get('message_count', 0):,} tin)")
-    # Không cần thêm dòng "Không tìm thấy" ở đây
 
-    # --- Tạo Embed ---
     if not least_text_channels and not least_voice_channels:
         log.debug("Không có dữ liệu kênh hoạt động ít (>0) để tạo embed.")
         return None
@@ -240,14 +258,19 @@ async def create_least_channel_activity_embed(
         color=discord.Color.light_grey()
     )
 
+    # Không thêm biểu đồ cho BXH "ít nhất"
+
+    text_field_value = "\n".join(least_text_lines) if least_text_lines else "*Không có kênh text nào phù hợp*"
     embed.add_field(
         name=f"{utils.get_channel_type_emoji(discord.ChannelType.text, bot)} Kênh Text",
-        value="\n".join(least_text_lines) if least_text_lines else "*Không có kênh text nào phù hợp*",
+        value=text_field_value[:1024],
         inline=False
     )
+
+    voice_field_value = "\n".join(least_voice_lines) if least_voice_lines else "*Không có kênh voice nào phù hợp*"
     embed.add_field(
         name=f"{utils.get_channel_type_emoji(discord.ChannelType.voice, bot)} Kênh Voice (Chat Text)",
-        value="\n".join(least_voice_lines) if least_voice_lines else "*Không có kênh voice nào phù hợp*",
+        value=voice_field_value[:1024],
         inline=False
     )
 
@@ -272,11 +295,9 @@ async def create_golden_hour_embed(
 
     embed = discord.Embed(
         title=f"☀️🌙 \"Giờ Vàng\" của Server ({timezone_str})",
-        description="*Khung giờ server và các kênh/chủ đề có nhiều tin nhắn nhất.*",
         color=discord.Color.gold()
     )
 
-    # --- Tính Giờ Vàng Server ---
     hourly_grouped = defaultdict(int)
     for hour, count in server_hourly_activity.items():
         if isinstance(hour, int) and 0 <= hour <= 23:
@@ -291,24 +312,41 @@ async def create_golden_hour_embed(
 
     sorted_server_hours = sorted(hourly_grouped.items(), key=lambda item: item[1], reverse=True)
 
+    # --- Biểu đồ giờ vàng server ---
+    bar_chart_server_str = ""
+    data_for_chart_server = sorted_server_hours[:5]
+    if data_for_chart_server:
+         def format_hour_key(start_hour):
+             try:
+                 utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
+                 local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
+                 local_start_dt = utc_start_dt.astimezone(local_tz)
+                 local_end_dt = local_start_dt + datetime.timedelta(hours=GOLDEN_HOUR_INTERVAL)
+                 return f"{local_start_dt.strftime('%H:%M')}-{local_end_dt.strftime('%H:%M')}"
+             except: return f"H:{start_hour}"
+
+         bar_chart_server_str = await utils.create_vertical_text_bar_chart(
+             sorted_data=data_for_chart_server,
+             key_formatter=format_hour_key,
+             top_n=5, max_chart_height=6, bar_width=1, bar_spacing=1, # Chart nhỏ hơn
+             chart_title="Top Khung Giờ Server", show_legend=True
+         )
+         embed.description = bar_chart_server_str # Đặt chart lên đầu
+    else:
+        embed.description = "*Khung giờ server và các kênh/chủ đề có nhiều tin nhắn nhất.*"
+
     server_golden_lines = []
     for rank, (start_hour, count) in enumerate(sorted_server_hours, 1):
         try:
             utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
             local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
             local_start_dt = utc_start_dt.astimezone(local_tz)
-        except ValueError:
-             log.warning(f"Không thể tạo datetime cho start_hour={start_hour} khi tính giờ vàng server.")
-             continue
-        except Exception as tz_convert_err:
-             log.warning(f"Lỗi chuyển đổi timezone khi tính giờ vàng server: {tz_convert_err}")
-             local_start_dt = utc_start_dt
-
+        except ValueError: continue
+        except Exception as tz_convert_err: local_start_dt = utc_start_dt
         local_end_dt = local_start_dt + datetime.timedelta(hours=GOLDEN_HOUR_INTERVAL)
         time_str = f"{local_start_dt.strftime('%H:%M')} - {local_end_dt.strftime('%H:%M')}"
         server_golden_lines.append(f"**`#{rank}`**. **{time_str}**: {count:,} tin")
-        if rank >= 3:
-            break
+        if rank >= 3: break
 
     embed.add_field(
         name="🏆 Khung Giờ Vàng Toàn Server",
@@ -316,24 +354,19 @@ async def create_golden_hour_embed(
         inline=False
     )
 
-    # --- Tính Giờ Vàng Kênh/Luồng ---
     location_hourly_activity = defaultdict(Counter)
     for loc_id, counts in channel_hourly_activity.items():
          if guild.get_channel_or_thread(loc_id):
              for hour, count in counts.items():
-                 if isinstance(hour, int) and 0 <= hour <= 23:
-                     location_hourly_activity[loc_id][hour] += count
-                 else:
-                     log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho channel {loc_id}: hour={hour}")
+                 if isinstance(hour, int) and 0 <= hour <= 23: location_hourly_activity[loc_id][hour] += count
+                 else: log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho channel {loc_id}: hour={hour}")
     for loc_id, counts in thread_hourly_activity.items():
         if guild.get_channel_or_thread(loc_id):
             for hour, count in counts.items():
-                if isinstance(hour, int) and 0 <= hour <= 23:
-                    location_hourly_activity[loc_id][hour] += count
-                else:
-                     log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho thread {loc_id}: hour={hour}")
+                if isinstance(hour, int) and 0 <= hour <= 23: location_hourly_activity[loc_id][hour] += count
+                else: log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho thread {loc_id}: hour={hour}")
 
-    location_golden_hours = {} # {loc_id: (start_hour, count)}
+    location_golden_hours = {}
     for loc_id, hourly_counts in location_hourly_activity.items():
         if not hourly_counts: continue
         loc_grouped = defaultdict(int)
@@ -345,10 +378,8 @@ async def create_golden_hour_embed(
                 best_start_hour, max_count = max(loc_grouped.items(), key=lambda item: item[1])
                 datetime.datetime.now(datetime.timezone.utc).replace(hour=best_start_hour, minute=0)
                 location_golden_hours[loc_id] = (best_start_hour, max_count)
-            except ValueError:
-                log.warning(f"Giờ vàng không hợp lệ ({best_start_hour}) được tính cho location {loc_id}, bỏ qua.")
-            except Exception as e_loc_gold:
-                 log.warning(f"Lỗi khi tính giờ vàng cho location {loc_id}: {e_loc_gold}")
+            except ValueError: log.warning(f"Giờ vàng không hợp lệ ({best_start_hour}) được tính cho location {loc_id}, bỏ qua.")
+            except Exception as e_loc_gold: log.warning(f"Lỗi khi tính giờ vàng cho location {loc_id}: {e_loc_gold}")
 
     sorted_locations_by_gold = sorted(location_golden_hours.items(), key=lambda item: item[1][1], reverse=True)
 
@@ -356,27 +387,17 @@ async def create_golden_hour_embed(
     locations_shown = 0
     for loc_id, (start_hour, count) in sorted_locations_by_gold:
         if locations_shown >= GOLDEN_HOUR_TOP_CHANNELS: break
-
         location_obj = guild.get_channel_or_thread(loc_id)
         if not location_obj: continue
-
-        loc_mention = location_obj.mention
-        loc_type_emoji = utils.get_channel_type_emoji(location_obj, bot)
-
+        loc_mention = location_obj.mention; loc_type_emoji = utils.get_channel_type_emoji(location_obj, bot)
         try:
              utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
              local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
              local_start_dt = utc_start_dt.astimezone(local_tz)
-        except ValueError:
-             log.warning(f"Không thể tạo datetime cho start_hour={start_hour} khi tính giờ vàng location {loc_id}.")
-             continue
-        except Exception as tz_convert_err_loc:
-             log.warning(f"Lỗi chuyển đổi timezone khi tính giờ vàng location {loc_id}: {tz_convert_err_loc}")
-             local_start_dt = utc_start_dt
-
+        except ValueError: continue
+        except Exception as tz_convert_err_loc: local_start_dt = utc_start_dt
         local_end_dt = local_start_dt + datetime.timedelta(hours=GOLDEN_HOUR_INTERVAL)
         time_str = f"{local_start_dt.strftime('%H:%M')}-{local_end_dt.strftime('%H:%M')}"
-
         location_golden_lines.append(f"{loc_type_emoji} {loc_mention}: **{time_str}** ({count:,} tin)")
         locations_shown += 1
 
@@ -385,10 +406,10 @@ async def create_golden_hour_embed(
         value="\n".join(location_golden_lines) if location_golden_lines else "Không có dữ liệu.",
         inline=False
     )
-
+    if len(embed.description) > 4096: embed.description = embed.description[:4090] + "\n[...]"
     return embed
 
-# --- HÀM MỚI ---
+
 async def create_umbra_hour_embed(
     server_hourly_activity: Counter,
     channel_hourly_activity: Dict[int, Counter],
@@ -408,28 +429,24 @@ async def create_umbra_hour_embed(
     embed = discord.Embed(
         title=f"🌃👻 \"Giờ Âm\" của Server ({timezone_str})",
         description="*Khung giờ server và các kênh/chủ đề có ít tin nhắn nhất.*",
-        color=discord.Color.dark_blue() # Màu khác
+        color=discord.Color.dark_blue()
     )
 
-    # --- Tính Giờ Âm Server ---
     hourly_grouped = defaultdict(int)
-    # Đảm bảo tất cả các khoảng giờ đều có trong dict để sắp xếp đúng
-    for h in range(0, 24, UMBRA_HOUR_INTERVAL):
-        hourly_grouped[h] = 0
-
+    for h in range(0, 24, UMBRA_HOUR_INTERVAL): hourly_grouped[h] = 0
     for hour, count in server_hourly_activity.items():
         if isinstance(hour, int) and 0 <= hour <= 23:
             start_hour = (hour // UMBRA_HOUR_INTERVAL) * UMBRA_HOUR_INTERVAL
             hourly_grouped[start_hour] += count
-        else:
-            log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho server (giờ âm): hour={hour} (type: {type(hour)})")
+        else: log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho server (giờ âm): hour={hour} (type: {type(hour)})")
 
     if not hourly_grouped:
         log.warning("Không có dữ liệu giờ hợp lệ để tính giờ âm server.")
         return None
 
-    # Sắp xếp tăng dần theo số lượng tin nhắn
     sorted_server_hours = sorted(hourly_grouped.items(), key=lambda item: item[1])
+
+    # Không vẽ biểu đồ cho giờ âm
 
     server_umbra_lines = []
     for rank, (start_hour, count) in enumerate(sorted_server_hours, 1):
@@ -437,18 +454,12 @@ async def create_umbra_hour_embed(
             utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
             local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
             local_start_dt = utc_start_dt.astimezone(local_tz)
-        except ValueError:
-             log.warning(f"Không thể tạo datetime cho start_hour={start_hour} khi tính giờ âm server.")
-             continue
-        except Exception as tz_convert_err:
-             log.warning(f"Lỗi chuyển đổi timezone khi tính giờ âm server: {tz_convert_err}")
-             local_start_dt = utc_start_dt
-
+        except ValueError: continue
+        except Exception as tz_convert_err: local_start_dt = utc_start_dt
         local_end_dt = local_start_dt + datetime.timedelta(hours=UMBRA_HOUR_INTERVAL)
         time_str = f"{local_start_dt.strftime('%H:%M')} - {local_end_dt.strftime('%H:%M')}"
         server_umbra_lines.append(f"**`#{rank}`**. **{time_str}**: {count:,} tin")
-        if rank >= 3: # Chỉ hiển thị top 3 khung giờ ít hoạt động nhất
-            break
+        if rank >= 3: break
 
     embed.add_field(
         name="📉 Khung Giờ Yên Ắng Nhất Server",
@@ -456,72 +467,51 @@ async def create_umbra_hour_embed(
         inline=False
     )
 
-    # --- Tính Giờ Âm Kênh/Luồng ---
     location_hourly_activity = defaultdict(Counter)
-    # (Logic tính location_hourly_activity giống như Giờ Vàng)
     for loc_id, counts in channel_hourly_activity.items():
          if guild.get_channel_or_thread(loc_id):
              for hour, count in counts.items():
-                 if isinstance(hour, int) and 0 <= hour <= 23:
-                     location_hourly_activity[loc_id][hour] += count
+                 if isinstance(hour, int) and 0 <= hour <= 23: location_hourly_activity[loc_id][hour] += count
                  else: log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho channel {loc_id} (giờ âm): hour={hour}")
     for loc_id, counts in thread_hourly_activity.items():
         if guild.get_channel_or_thread(loc_id):
             for hour, count in counts.items():
-                if isinstance(hour, int) and 0 <= hour <= 23:
-                    location_hourly_activity[loc_id][hour] += count
+                if isinstance(hour, int) and 0 <= hour <= 23: location_hourly_activity[loc_id][hour] += count
                 else: log.warning(f"Bỏ qua dữ liệu giờ không hợp lệ cho thread {loc_id} (giờ âm): hour={hour}")
 
-    location_umbra_hours = {} # {loc_id: (start_hour, count)}
+    location_umbra_hours = {}
     for loc_id, hourly_counts in location_hourly_activity.items():
-        if not hourly_counts: continue # Bỏ qua kênh/luồng không có hoạt động giờ
+        if not hourly_counts: continue
         loc_grouped = defaultdict(int)
-        # Đảm bảo đủ 24/UMBRA_HOUR_INTERVAL khung giờ
         for h in range(0, 24, UMBRA_HOUR_INTERVAL): loc_grouped[h] = 0
-
         for hour, count in hourly_counts.items():
             start_hour = (hour // UMBRA_HOUR_INTERVAL) * UMBRA_HOUR_INTERVAL
             loc_grouped[start_hour] += count
-
         if loc_grouped:
             try:
-                # Tìm khung giờ có ít tin nhắn nhất
                 least_start_hour, min_count = min(loc_grouped.items(), key=lambda item: item[1])
-                datetime.datetime.now(datetime.timezone.utc).replace(hour=least_start_hour, minute=0) # Check valid hour
+                datetime.datetime.now(datetime.timezone.utc).replace(hour=least_start_hour, minute=0)
                 location_umbra_hours[loc_id] = (least_start_hour, min_count)
-            except ValueError:
-                log.warning(f"Giờ âm không hợp lệ ({least_start_hour}) được tính cho location {loc_id}, bỏ qua.")
-            except Exception as e_loc_umbra:
-                 log.warning(f"Lỗi khi tính giờ âm cho location {loc_id}: {e_loc_umbra}")
+            except ValueError: log.warning(f"Giờ âm không hợp lệ ({least_start_hour}) được tính cho location {loc_id}, bỏ qua.")
+            except Exception as e_loc_umbra: log.warning(f"Lỗi khi tính giờ âm cho location {loc_id}: {e_loc_umbra}")
 
-    # Sắp xếp các kênh/luồng theo số tin nhắn trong giờ âm của chúng (tăng dần)
     sorted_locations_by_umbra = sorted(location_umbra_hours.items(), key=lambda item: item[1][1])
 
     location_umbra_lines = []
     locations_shown = 0
     for loc_id, (start_hour, count) in sorted_locations_by_umbra:
         if locations_shown >= UMBRA_HOUR_TOP_CHANNELS: break
-
         location_obj = guild.get_channel_or_thread(loc_id)
         if not location_obj: continue
-
-        loc_mention = location_obj.mention
-        loc_type_emoji = utils.get_channel_type_emoji(location_obj, bot)
-
+        loc_mention = location_obj.mention; loc_type_emoji = utils.get_channel_type_emoji(location_obj, bot)
         try:
              utc_start_dt = datetime.datetime.now(datetime.timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
              local_tz = datetime.timezone(datetime.timedelta(hours=local_offset_hours))
              local_start_dt = utc_start_dt.astimezone(local_tz)
-        except ValueError:
-             log.warning(f"Không thể tạo datetime cho start_hour={start_hour} khi tính giờ âm location {loc_id}.")
-             continue
-        except Exception as tz_convert_err_loc:
-             log.warning(f"Lỗi chuyển đổi timezone khi tính giờ âm location {loc_id}: {tz_convert_err_loc}")
-             local_start_dt = utc_start_dt
-
+        except ValueError: continue
+        except Exception as tz_convert_err_loc: local_start_dt = utc_start_dt
         local_end_dt = local_start_dt + datetime.timedelta(hours=UMBRA_HOUR_INTERVAL)
         time_str = f"{local_start_dt.strftime('%H:%M')}-{local_end_dt.strftime('%H:%M')}"
-
         location_umbra_lines.append(f"{loc_type_emoji} {loc_mention}: **{time_str}** ({count:,} tin)")
         locations_shown += 1
 

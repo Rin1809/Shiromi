@@ -6,20 +6,20 @@ import logging
 import collections
 import asyncio
 from typing import List, Dict, Any, Optional, Union, Set
+import unicodedata
 
-# Sử dụng import tuyệt đối cho utils và config
-import utils
+import utils # Chỉ import utils
 import config
-# Import helper định dạng cây từ embeds_user
-from .embeds_user import _format_user_tree_line # <--- Import helper này
+# Bỏ import này vì hàm _format_user_tree_line đã chuyển sang utils
+# from .embeds_user import _format_user_tree_line
 
 log = logging.getLogger(__name__)
 
 # --- Constants ---
-TOP_INVITERS_LIMIT = 15 # Giảm giới hạn để phù hợp cây
+TOP_INVITERS_LIMIT = 15
 TOP_STICKER_USAGE_LIMIT = 15
-UNUSED_EMOJI_LIMIT = 25 # Giới hạn hiển thị emoji không dùng
-LEAST_STICKER_USAGE_LIMIT = 15 # Giới hạn cho sticker ít dùng
+UNUSED_EMOJI_LIMIT = 25
+LEAST_STICKER_USAGE_LIMIT = 15
 
 # --- Embed Functions ---
 
@@ -28,11 +28,11 @@ async def create_top_inviters_embed(
     guild: discord.Guild,
     bot: discord.Client
 ) -> Optional[discord.Embed]:
-    """Tạo embed xếp hạng người mời dựa trên tổng số lượt sử dụng các invite của họ (DẠNG CÂY)."""
+    """Tạo embed xếp hạng người mời."""
     e = lambda name: utils.get_emoji(name, bot)
     title = f"{e('invite')} Top Người Mời (Lượt sử dụng)"
     limit = TOP_INVITERS_LIMIT
-    filter_admins = False # Thường không lọc admin cho BXH mời
+    filter_admins = False
     color=discord.Color.dark_teal()
     item_name_singular="lượt dùng"
     item_name_plural="lượt dùng"
@@ -42,7 +42,6 @@ async def create_top_inviters_embed(
         log.debug("Bỏ qua tạo Top Người Mời embed: Không có dữ liệu.")
         return None
 
-    # Lọc bot (admin không lọc theo filter_admins=False)
     filtered_sorted_users = [
         (uid, count) for uid, count in invite_usage_counts.most_common()
         if count > 0 and not getattr(guild.get_member(uid), 'bot', True)
@@ -51,34 +50,23 @@ async def create_top_inviters_embed(
         log.debug("Bỏ qua tạo Top Người Mời embed: Không có user hợp lệ.")
         return None
 
-    total_users_in_lb = len(filtered_sorted_users)
-    users_to_display = filtered_sorted_users[:limit]
-    user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
-    user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot)
-
-    title_emoji = e('award') if e('award') != '❓' else '🏆'
-    embed = discord.Embed(title=f"{title_emoji} {title}", color=color)
-    desc_prefix = "*Đã lọc bot.*" # Không lọc admin
-    description_lines = [desc_prefix, ""]
-
-    for rank, (user_id, count) in enumerate(users_to_display, 1):
-        # Không có thông tin phụ cho BXH này
-        lines = await _format_user_tree_line(
-            rank, user_id, count, item_name_singular, item_name_plural,
-            guild, user_cache, secondary_info=None
-        )
-        description_lines.extend(lines)
-
-    if description_lines and description_lines[-1] == "": description_lines.pop()
-    embed.description = "\n".join(description_lines)
-    if len(embed.description) > 4096: embed.description = embed.description[:4090] + "\n[...]"
-
-    footer_text = footer_note
-    if total_users_in_lb > limit:
-        footer_text = f"... và {total_users_in_lb - limit} người dùng khác. | {footer_note}"
-    embed.set_footer(text=footer_text)
-
-    return embed
+    # Gọi helper từ utils
+    return await utils.create_user_leaderboard_embed(
+        title=title,
+        counts=invite_usage_counts,
+        value_key=None,
+        guild=guild,
+        bot=bot,
+        limit=limit,
+        item_name_singular=item_name_singular,
+        item_name_plural=item_name_plural,
+        e=e,
+        color=color,
+        filter_admins=filter_admins,
+        tertiary_info_getter=lambda *_: footer_note,
+        minimum_value=1,
+        show_bar_chart=True
+    )
 
 
 async def create_top_sticker_usage_embed(
@@ -88,7 +76,7 @@ async def create_top_sticker_usage_embed(
     scan_data: Dict[str, Any],
     limit: int = TOP_STICKER_USAGE_LIMIT
 ) -> Optional[discord.Embed]:
-    """Tạo embed hiển thị top stickers (server và mặc định) được sử dụng nhiều nhất."""
+    """Tạo embed hiển thị top stickers được sử dụng nhiều nhất."""
     if not sticker_counts:
         log.debug("Bỏ qua tạo Top Sticker Usage embed: Counter rỗng.")
         return None
@@ -101,61 +89,75 @@ async def create_top_sticker_usage_embed(
         title=f"{title_emoji} {title_item_emoji} BXH Top {limit} Stickers Được Dùng Nhiều Nhất",
         color=discord.Color.dark_orange()
     )
-    desc = "*Dựa trên số lần sticker được gửi.*"
+    desc_base = "*Dựa trên số lần sticker được gửi.*"
 
-    sorted_stickers = sticker_counts.most_common(limit)
+    sorted_stickers = sticker_counts.most_common()
+    if not sorted_stickers: return None
 
-    sticker_ids_to_fetch = [int(sid) for sid, count in sorted_stickers if sid.isdigit()]
-    fetched_stickers_cache: Dict[int, Optional[discord.Sticker]] = {}
-    if sticker_ids_to_fetch and bot:
-        log.debug(f"Fetching {len(sticker_ids_to_fetch)} stickers for top usage embed...")
-        async def fetch_sticker_safe(sticker_id):
-            try: return await bot.fetch_sticker(sticker_id)
-            except Exception: return None
-        results = await asyncio.gather(*(fetch_sticker_safe(sid) for sid in sticker_ids_to_fetch))
-        for sticker in results:
-            if sticker: fetched_stickers_cache[sticker.id] = sticker
-        log.debug(f"Fetch sticker hoàn thành cho top usage. Cache size: {len(fetched_stickers_cache)}")
+    bar_chart_str = ""
+    data_for_chart = sorted_stickers[:5]
+    if data_for_chart:
+        sticker_ids_to_fetch_chart = [int(sid) for sid, count in data_for_chart if sid.isdigit()]
+        chart_sticker_name_cache: Dict[int, str] = {}
+        if sticker_ids_to_fetch_chart:
+             chart_sticker_name_cache = await utils._fetch_sticker_dict(sticker_ids_to_fetch_chart, bot)
+
+        async def format_sticker_key(sticker_id_str):
+            if sticker_id_str.isdigit():
+                sticker_id = int(sticker_id_str)
+                name = chart_sticker_name_cache.get(sticker_id, "...")
+                prefix = f"{e('star')} " if sticker_id in server_sticker_ids else ""
+                return f"{prefix}'{utils.escape_markdown(name)}'"
+            return f"ID:{sticker_id_str}"
+
+        bar_chart_str = await utils.create_vertical_text_bar_chart(
+            sorted_data=data_for_chart,
+            key_formatter=format_sticker_key,
+            top_n=5, max_chart_height=8, bar_width=1, bar_spacing=1,
+            chart_title="Top 5 Stickers", show_legend=True
+        )
+
+    display_list_stickers = sorted_stickers[:limit]
+    sticker_ids_to_fetch_list = [int(sid) for sid, count in display_list_stickers if sid.isdigit()]
+    list_sticker_name_cache: Dict[int, str] = {}
+    if sticker_ids_to_fetch_list:
+         list_sticker_name_cache = await utils._fetch_sticker_dict(sticker_ids_to_fetch_list, bot)
 
     sticker_lines = []
-    podium_emojis = ["🥇", "🥈", "🥉"] # Thêm podium cho sticker
-    for rank, (sticker_id_str, count) in enumerate(sorted_stickers, 1):
+    podium_emojis = ["🥇", "🥈", "🥉"]
+    for rank, (sticker_id_str, count) in enumerate(display_list_stickers, 1):
         display_sticker = f"ID: `{sticker_id_str}`"
-        sticker_obj: Optional[discord.Sticker] = None
         is_server_sticker = False
-        sticker_name = "Unknown/Deleted"
-
         if sticker_id_str.isdigit():
             sticker_id = int(sticker_id_str)
             if sticker_id in server_sticker_ids: is_server_sticker = True
-            sticker_obj = fetched_stickers_cache.get(sticker_id)
-            if sticker_obj:
-                sticker_name = utils.escape_markdown(sticker_obj.name)
-                display_sticker = f"'{sticker_name}' (`{sticker_id_str}`)"
+            sticker_name = list_sticker_name_cache.get(sticker_id, "...")
+            display_sticker = f"'{utils.escape_markdown(sticker_name)}' (`{sticker_id_str}`)"
         elif not sticker_id_str.isdigit():
             display_sticker = "`ID không hợp lệ?`"
-            sticker_name = "Invalid ID"
 
         if is_server_sticker: display_sticker += f" {e('star')}"
 
         rank_prefix = podium_emojis[rank-1] if rank <= 3 else f"`#{rank:02d}`"
         sticker_lines.append(f"{rank_prefix} {display_sticker} — **{count:,}** lần")
 
-    if not sticker_lines:
-        log.debug("Không có dòng sticker hợp lệ nào để hiển thị sau khi fetch/xử lý.")
-        return None
+    if not sticker_lines: return None
 
     if len(sticker_counts) > limit:
         sticker_lines.append(f"\n... và {len(sticker_counts) - limit} sticker khác.")
 
-    embed.description = desc + "\n\n" + "\n".join(sticker_lines)
+    embed.description = desc_base
+    if bar_chart_str:
+        embed.description += "\n\n" + bar_chart_str
+    embed.description += "\n\n" + "\n".join(sticker_lines)
+
     if len(embed.description) > 4096:
         embed.description = embed.description[:4090] + "\n[...]"
 
     embed.set_footer(text=f"{e('star')} = Sticker của Server này.")
     return embed
 
-# --- HÀM MỚI ---
+
 async def create_least_sticker_usage_embed(
     sticker_counts: collections.Counter,
     bot: discord.Client,
@@ -174,68 +176,52 @@ async def create_least_sticker_usage_embed(
     title_item_emoji = e('sticker') if e('sticker') != '❓' else '✨'
     embed = discord.Embed(
         title=f"{title_emoji} {title_item_emoji} BXH Top {limit} Stickers Ít Được Sử Dụng Nhất",
-        color=discord.Color.from_rgb(176, 196, 222) # Light Steel Blue
+        color=discord.Color.from_rgb(176, 196, 222)
     )
-    desc = "*Dựa trên số lần sticker được gửi. Chỉ tính sticker có > 0 lượt.*"
+    desc_base = "*Dựa trên số lần sticker được gửi. Chỉ tính sticker có > 0 lượt.*"
 
-    # Lọc sticker có > 0 lượt và sắp xếp tăng dần
     filtered_stickers = {sid: count for sid, count in sticker_counts.items() if count > 0}
     if not filtered_stickers:
-        embed.description = desc + "\n\n*Không có sticker nào được sử dụng ít nhất 1 lần.*"
+        embed.description = desc_base + "\n\n*Không có sticker nào được sử dụng ít nhất 1 lần.*"
         return embed
 
-    sorted_stickers = sorted(filtered_stickers.items(), key=lambda item: item[1])[:limit]
+    sorted_stickers = sorted(filtered_stickers.items(), key=lambda item: item[1])
 
-    sticker_ids_to_fetch = [int(sid) for sid, count in sorted_stickers if sid.isdigit()]
-    fetched_stickers_cache: Dict[int, Optional[discord.Sticker]] = {}
-    if sticker_ids_to_fetch and bot:
-        # (Logic fetch sticker giống như hàm top)
-        log.debug(f"Fetching {len(sticker_ids_to_fetch)} stickers for least usage embed...")
-        async def fetch_sticker_safe(sticker_id):
-            try: return await bot.fetch_sticker(sticker_id)
-            except Exception: return None
-        results = await asyncio.gather(*(fetch_sticker_safe(sid) for sid in sticker_ids_to_fetch))
-        for sticker in results:
-            if sticker: fetched_stickers_cache[sticker.id] = sticker
-        log.debug(f"Fetch sticker hoàn thành cho least usage. Cache size: {len(fetched_stickers_cache)}")
+    display_list_stickers = sorted_stickers[:limit]
+    sticker_ids_to_fetch_list = [int(sid) for sid, count in display_list_stickers if sid.isdigit()]
+    list_sticker_name_cache: Dict[int, str] = {}
+    if sticker_ids_to_fetch_list:
+        list_sticker_name_cache = await utils._fetch_sticker_dict(sticker_ids_to_fetch_list, bot)
 
     sticker_lines = []
-    for rank, (sticker_id_str, count) in enumerate(sorted_stickers, 1):
+    for rank, (sticker_id_str, count) in enumerate(display_list_stickers, 1):
         display_sticker = f"ID: `{sticker_id_str}`"
         is_server_sticker = False
-        sticker_name = "Unknown/Deleted"
-
         if sticker_id_str.isdigit():
             sticker_id = int(sticker_id_str)
             if sticker_id in server_sticker_ids: is_server_sticker = True
-            sticker_obj = fetched_stickers_cache.get(sticker_id)
-            if sticker_obj:
-                sticker_name = utils.escape_markdown(sticker_obj.name)
-                display_sticker = f"'{sticker_name}' (`{sticker_id_str}`)"
+            sticker_name = list_sticker_name_cache.get(sticker_id, "...")
+            display_sticker = f"'{utils.escape_markdown(sticker_name)}' (`{sticker_id_str}`)"
         elif not sticker_id_str.isdigit():
             display_sticker = "`ID không hợp lệ?`"
-            sticker_name = "Invalid ID"
 
         if is_server_sticker: display_sticker += f" {e('star')}"
 
         rank_prefix = f"`#{rank:02d}`"
         sticker_lines.append(f"{rank_prefix} {display_sticker} — **{count:,}** lần")
 
-    if not sticker_lines:
-        log.debug("Không có dòng sticker hợp lệ nào để hiển thị (ít dùng).")
-        return None # Trường hợp hiếm
+    if not sticker_lines: return None
 
     if len(filtered_stickers) > limit:
         sticker_lines.append(f"\n... và {len(filtered_stickers) - limit} sticker khác (> 0 lượt).")
 
-    embed.description = desc + "\n\n" + "\n".join(sticker_lines)
+    embed.description = desc_base + "\n\n" + "\n".join(sticker_lines)
     if len(embed.description) > 4096:
         embed.description = embed.description[:4090] + "\n[...]"
 
     embed.set_footer(text=f"{e('star')} = Sticker của Server này.")
     return embed
 
-# --- HÀM MỚI ---
 async def create_unused_emoji_embed(
     guild: discord.Guild,
     overall_custom_emoji_content_counts: collections.Counter,

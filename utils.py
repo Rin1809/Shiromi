@@ -8,14 +8,17 @@ import os
 from typing import Optional, Union, List, Any, Dict, Set, Counter, Tuple
 import logging
 import re
-from collections import Counter # <<< THÊM IMPORT
-import asyncio # <<< THÊM IMPORT
+from collections import Counter, defaultdict, OrderedDict # Thêm OrderedDict
+import asyncio
+import math
+import unicodedata # Thêm import
+import collections
+import config
 
 log = logging.getLogger(__name__)
 
-# --- Cấu hình Emoji (Load từ .env hoặc fallback) ---
+# --- Cấu hình Emoji ---
 load_dotenv()
-# Định nghĩa EMOJI_IDS từ .env hoặc giá trị mặc định
 EMOJI_IDS = {
     "stats": os.getenv("EMOJI_STATS", "📊"),
     "text_channel": os.getenv("EMOJI_TEXT_CHANNEL", "📄"),
@@ -38,7 +41,7 @@ EMOJI_IDS = {
     "bell": os.getenv("EMOJI_BELL", "🔔"),
     "rules": os.getenv("EMOJI_RULES", "📜"),
     "megaphone": os.getenv("EMOJI_MEGAPHONE", "📢"),
-    "zzz": os.getenv("EMOJI_AFK", "💤"), # Sửa tên key thành zzz nếu dùng EMOJI_AFK
+    "zzz": os.getenv("EMOJI_AFK", "💤"),
     "star": os.getenv("EMOJI_STAR_FEATURE", "✨"),
     "online": os.getenv("EMOJI_STATUS_ONLINE", "🟢"),
     "idle": os.getenv("EMOJI_STATUS_IDLE", "🌙"),
@@ -49,10 +52,10 @@ EMOJI_IDS = {
     "stage": os.getenv("EMOJI_STAGE_CHANNEL", "🎤"),
     "forum": os.getenv("EMOJI_FORUM_CHANNEL", "💬"),
     "invite": os.getenv("EMOJI_INVITE", "🔗"),
-    "webhook": os.getenv("EMOJI_WEBHOOK", "<:webhook:your_webhook_emoji_id>"), # Giữ nguyên ID placeholder nếu không có trong .env
+    "webhook": os.getenv("EMOJI_WEBHOOK", "<:webhook:12345>"),
     "integration": os.getenv("EMOJI_INTEGRATION", "🔌"),
     "csv_file": os.getenv("EMOJI_CSV_FILE", "💾"),
-    "json_file": os.getenv("EMOJI_JSON_FILE", "<:json:12345>"), # Giữ nguyên ID placeholder nếu không có trong .env
+    "json_file": os.getenv("EMOJI_JSON_FILE", "<:json:12345>"),
     "mention": os.getenv("EMOJI_MENTION", "@"),
     "hashtag": os.getenv("EMOJI_HASHTAG", "#"),
     "thread": os.getenv("EMOJI_THREAD", "<a:z_1049623938931630101:1274398186508783649>"),
@@ -62,7 +65,7 @@ EMOJI_IDS = {
     "image": os.getenv("EMOJI_IMAGE", "🖼️"),
     "sticker": os.getenv("EMOJI_STICKER", "✨"),
     "award": os.getenv("EMOJI_AWARD", "🏆"),
-    "reply": os.getenv("EMOJI_REPLY", "↪️"), # Thêm key reply nếu chưa có
+    "reply": os.getenv("EMOJI_REPLY", "↪️"),
 }
 
 
@@ -211,101 +214,333 @@ def escape_markdown(text: Optional[str]) -> str:
 
 def get_user_rank(
     user_id: int,
-    ranking_data: Dict[str, Dict[int, int]], # Dict chứa hạng đã tính toán
-    rank_key: str # Key của BXH cần lấy hạng (vd: 'messages', 'tracked_role_123')
+    ranking_data: Dict[str, Dict[int, int]],
+    rank_key: str
 ) -> Optional[int]:
     """Lấy thứ hạng của user từ dữ liệu xếp hạng đã chuẩn bị."""
     return ranking_data.get(rank_key, {}).get(user_id)
 
-# --- THÊM HÀM HELPER _fetch_user_dict ---
+# --- HÀM HELPER _fetch_user_dict ---
 async def _fetch_user_dict(guild: discord.Guild, user_ids: List[int], bot: Union[discord.Client, commands.Bot]) -> Dict[int, Optional[Union[discord.Member, discord.User]]]:
     """Fetch a list of users/members efficiently and return a dictionary."""
     user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]] = {}
     if not user_ids: return user_cache
-
-    # Loại bỏ ID trùng lặp và không hợp lệ
     valid_user_ids = list(set(uid for uid in user_ids if isinstance(uid, int)))
-
-    # Tối ưu: Lấy từ cache guild trước nếu có thể
     remaining_ids = []
     for uid in valid_user_ids:
         member = guild.get_member(uid)
-        if member:
-            user_cache[uid] = member
-        else:
-            remaining_ids.append(uid)
-
-    # Fetch những user còn lại
+        if member: user_cache[uid] = member
+        else: remaining_ids.append(uid)
     if remaining_ids:
         log.debug(f"Fetching {len(remaining_ids)} remaining users for dict cache...")
         fetch_tasks = [fetch_user_data(guild, user_id, bot_ref=bot) for user_id in remaining_ids]
         results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-
         for idx, result in enumerate(results):
             user_id = remaining_ids[idx]
-            if isinstance(result, (discord.User, discord.Member)):
-                user_cache[user_id] = result
-            else:
-                user_cache[user_id] = None # Mark as not found or error
-            if isinstance(result, Exception):
-                log.debug(f"Failed to fetch user {user_id} for dict: {result}")
+            if isinstance(result, (discord.User, discord.Member)): user_cache[user_id] = result
+            else: user_cache[user_id] = None
+            if isinstance(result, Exception): log.debug(f"Failed to fetch user {user_id} for dict: {result}")
     return user_cache
-# --- KẾT THÚC THÊM HÀM HELPER _fetch_user_dict ---
 
-# --- THÊM HÀM HELPER FETCH STICKER DICT ---
+# --- HÀM HELPER FETCH STICKER DICT ---
 async def _fetch_sticker_dict(sticker_ids: List[int], bot: Union[discord.Client, commands.Bot]) -> Dict[int, str]:
     """Fetch sticker names efficiently and return a dictionary {id: name}."""
     sticker_cache: Dict[int, str] = {}
-    if not sticker_ids or not bot:
-        return sticker_cache
-
-    # Loại bỏ ID trùng lặp và không hợp lệ
+    if not sticker_ids or not bot: return sticker_cache
     unique_sticker_ids = list(set(sid for sid in sticker_ids if isinstance(sid, int)))
     if not unique_sticker_ids: return sticker_cache
-
     async def fetch_sticker_name(sticker_id):
         try:
             sticker = await bot.fetch_sticker(sticker_id)
             return sticker_id, sticker.name if sticker else "Unknown/Deleted"
-        except discord.NotFound:
-            return sticker_id, "Unknown/Deleted"
-        except Exception as e:
-            log.debug(f"Failed to fetch sticker {sticker_id}: {e}")
-            return sticker_id, "Fetch Error"
-
+        except discord.NotFound: return sticker_id, "Unknown/Deleted"
+        except Exception as e: log.debug(f"Failed to fetch sticker {sticker_id}: {e}"); return sticker_id, "Fetch Error"
     log.debug(f"Fetching names for {len(unique_sticker_ids)} unique stickers...")
     fetch_tasks = [fetch_sticker_name(sid) for sid in unique_sticker_ids]
     results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-
     for res in results:
-        if isinstance(res, tuple):
-            sticker_id, name = res
-            sticker_cache[sticker_id] = name
-        elif isinstance(res, Exception):
-            # Lỗi không mong muốn, không lưu vào cache
-            pass
+        if isinstance(res, tuple): sticker_cache[res[0]] = res[1]
+        elif isinstance(res, Exception): pass
     log.debug(f"Sticker name fetch complete. Cache size: {len(sticker_cache)}")
     return sticker_cache
-# --- KẾT THÚC HÀM HELPER FETCH STICKER DICT ---
 
-# --- THÊM HÀM LẤY TIMEZONE OFFSET ---
-# Biến toàn cục để lưu offset đã tính (tránh tính lại nhiều lần)
+# --- HÀM LẤY TIMEZONE OFFSET ---
 local_timezone_offset_hours: Optional[int] = None
-
 def get_local_timezone_offset() -> int:
     """Trả về offset timezone local so với UTC tính bằng giờ."""
     global local_timezone_offset_hours
     if local_timezone_offset_hours is None:
         try:
-            # time.timezone trả về offset tính bằng giây phía TÂY UTC (nên cần đảo dấu)
             local_offset_seconds = time.timezone
-            # Chia cho 3600 để đổi sang giờ, dùng round để xử lý offset 30 phút
             local_timezone_offset_hours = round(local_offset_seconds / -3600)
             log.info(f"Xác định timezone offset của bot: UTC{local_timezone_offset_hours:+d}")
         except Exception as tz_err:
             log.warning(f"Không thể xác định timezone offset của bot: {tz_err}. Mặc định về UTC (0).")
-            local_timezone_offset_hours = 0 # Fallback về UTC nếu lỗi
+            local_timezone_offset_hours = 0
     return local_timezone_offset_hours
-# --- KẾT THÚC HÀM LẤY TIMEZONE OFFSET ---
+
+# --- HÀM TẠO BIỂU ĐỒ DỌC ---
+async def create_vertical_text_bar_chart(
+    sorted_data: List[Tuple[Any, Union[int, float]]],
+    key_formatter: Optional[callable] = None,
+    top_n: int = 5,
+    max_chart_height: int = 10,
+    bar_width: int = 1,
+    bar_spacing: int = 2,
+    chart_title: Optional[str] = None,
+    show_legend: bool = True,
+    value_formatter: Optional[callable] = None
+) -> str:
+    """Tạo biểu đồ cột DỌC dạng text từ dữ liệu đã sắp xếp."""
+    if not sorted_data: return ""
+    data_to_chart = sorted_data[:top_n]
+    if not data_to_chart: return ""
+    numeric_values = [val for _, val in data_to_chart if isinstance(val, (int, float))]
+    if not numeric_values:
+        log.debug("Vertical chart: No numeric values in top_n data.")
+        return "```text\n(Không có dữ liệu số để vẽ biểu đồ)\n```"
+    max_value = max(numeric_values) if numeric_values else 0
+    if max_value <= 0:
+        log.debug("Vertical chart: Max value is not positive.")
+        return "```text\n(Giá trị không dương, không thể vẽ biểu đồ)\n```"
+    bar_heights = []
+    for _, value in data_to_chart:
+        height = 0
+        if isinstance(value, (int, float)) and value > 0:
+            height = max(1, round((value / max_value) * max_chart_height))
+        bar_heights.append(int(height))
+    chart_lines = []
+    bar_char = '█'; space_char = ' '; item_total_width = bar_width + bar_spacing
+    for h in range(max_chart_height, 0, -1):
+        line = ""
+        for i in range(len(data_to_chart)):
+            if bar_heights[i] >= h: line += (bar_char * bar_width) + (space_char * bar_spacing)
+            else: line += (space_char * bar_width) + (space_char * bar_spacing)
+        chart_lines.append(line.rstrip())
+    axis_width = len(data_to_chart) * item_total_width - bar_spacing
+    chart_lines.append('─' * axis_width)
+    label_line = ""
+    for i in range(len(data_to_chart)):
+        rank_str = f"#{i+1}"; label_line += rank_str.center(item_total_width)
+    chart_lines.append(label_line.rstrip())
+    legend_lines = []
+    if show_legend and key_formatter:
+        legend_lines.append(""); key_format_tasks = []
+        keys_to_format = [key for key, _ in data_to_chart]
+        for key in keys_to_format:
+             if asyncio.iscoroutinefunction(key_formatter): key_format_tasks.append(key_formatter(key))
+             elif callable(key_formatter):
+                 try:
+                      result = key_formatter(key)
+                      async def _dummy_coro(res): return res
+                      key_format_tasks.append(_dummy_coro(result))
+                 except Exception as e:
+                      log.debug(f"Lỗi gọi key_formatter (non-async) cho {key}: {e}")
+                      async def _error_coro(k): return f"Error ({k})"
+                      key_format_tasks.append(_error_coro(key))
+             else:
+                  async def _str_coro(k): return str(k)
+                  key_format_tasks.append(_str_coro(key))
+        formatted_keys = await asyncio.gather(*key_format_tasks, return_exceptions=True)
+        for i, (key, value) in enumerate(data_to_chart):
+            key_str = "Error"
+            if i < len(formatted_keys):
+                if isinstance(formatted_keys[i], Exception):
+                    key_str = f"Error ({key})"
+                    log.debug(f"Exception during key formatting for {key}: {formatted_keys[i]}")
+                else: key_str = str(formatted_keys[i])
+            else: key_str = str(key)
+            value_str = str(value)
+            if value_formatter:
+                try: value_str = value_formatter(value)
+                except Exception as e: log.debug(f"Lỗi value_formatter cho {value}: {e}")
+            elif isinstance(value, (int, float)): value_str = f"{value:,}"
+            max_key_len = 35
+            key_display = (key_str[:max_key_len] + '…') if len(key_str) > max_key_len else key_str
+            legend_lines.append(f"`#{i+1}`: {key_display} ({value_str})")
+    output_lines = []
+    if chart_title: output_lines.append(f"📊 **{chart_title} (Top {len(data_to_chart)})**")
+    output_lines.extend(chart_lines)
+    if legend_lines: output_lines.extend(legend_lines)
+    return "```text\n" + "\n".join(output_lines) + "\n```"
+
+# --- HÀM HELPER TẠO DÒNG USER CÂY ---
+async def _format_user_tree_line(
+    rank: int, user_id: int, main_value: Any, main_unit_singular: str, main_unit_plural: str,
+    guild: discord.Guild, user_cache: Dict[int, Optional[Union[discord.Member, discord.User]]],
+    secondary_info: Optional[str] = None, tertiary_info: Optional[str] = None
+) -> List[str]:
+    """Tạo các dòng cho một user trong cây leaderboard."""
+    lines = []; rank_prefix = f"`#{rank:02d}`"
+    user_obj = user_cache.get(user_id)
+    user_mention = user_obj.mention if user_obj else f"`{user_id}`"
+    user_display_name = f" ({escape_markdown(user_obj.display_name)})" if user_obj else " (Unknown/Left)"
+    lines.append(f"{rank_prefix} {user_mention}{user_display_name}")
+    if isinstance(main_value, (int, float)):
+        main_value_formatted = f"{main_value:,}"; main_unit = main_unit_plural if main_value != 1 else main_unit_singular
+    else: main_value_formatted = str(main_value); main_unit = main_unit_plural
+    if isinstance(main_value, str) and any(s in main_value for s in ["ngày", "giờ", "phút", "giây", "/", ":"]): lines.append(f"  `└` **{main_value_formatted}**")
+    else:
+        if isinstance(main_value, (int, float)) and main_value == 0: lines.append(f"  `└` **{main_value_formatted}** {main_unit}")
+        elif main_value_formatted: lines.append(f"  `└` **{main_value_formatted}** {main_unit}")
+    if secondary_info: lines.append(f"  `└` {secondary_info}")
+    if tertiary_info: lines.append(f"  `└` {tertiary_info}")
+    lines.append("")
+    return lines
+
+# --- HÀM HELPER CHUNG CHO TẠO BXH USER (DI CHUYỂN TỪ embeds_user.py) ---
+async def create_user_leaderboard_embed(
+    title: str,
+    counts: Optional[Union[collections.Counter, Dict[int, Any], collections.OrderedDict]], # Thêm OrderedDict
+    value_key: Optional[str],
+    guild: discord.Guild,
+    bot: Union[discord.Client, commands.Bot],
+    limit: int,
+    item_name_singular: str,
+    item_name_plural: str,
+    e: callable,
+    color: discord.Color,
+    filter_admins: bool,
+    sort_ascending: bool = False,
+    secondary_info_getter: Optional[callable] = None,
+    tertiary_info_getter: Optional[callable] = None,
+    minimum_value: Optional[Union[int, float]] = None,
+    show_bar_chart: bool = True
+) -> Optional[discord.Embed]:
+    """Hàm helper chung để tạo embed leaderboard dạng cây cho user."""
+    if not counts:
+        log.debug(f"Bỏ qua tạo embed '{title}': Không có dữ liệu counts.")
+        return None
+
+    processed_users = [] # List of (user_id, value)
+    if isinstance(counts, (collections.Counter, collections.OrderedDict)):
+        source_items = list(counts.items())
+        if isinstance(counts, collections.Counter): # Sắp xếp nếu là Counter
+            source_items.sort(key=lambda item: item[1], reverse=not sort_ascending)
+
+        for uid, count_val in source_items:
+             if isinstance(count_val, (int, float)):
+                 if minimum_value is None or count_val >= minimum_value:
+                      processed_users.append((uid, count_val))
+             elif isinstance(count_val, str): # Xử lý giá trị string (vd: span đã format)
+                 if minimum_value is None: # Không lọc min cho string
+                     processed_users.append((uid, count_val))
+
+    elif isinstance(counts, dict) and value_key:
+        temp_list = []
+        for uid, data in counts.items():
+            if not data.get('is_bot', False):
+                count_val = data.get(value_key, 0)
+                if isinstance(count_val, (int, float)):
+                    if minimum_value is None or count_val >= minimum_value:
+                        temp_list.append((uid, count_val))
+        temp_list.sort(key=lambda item: item[1], reverse=not sort_ascending)
+        processed_users = temp_list
+    else:
+        log.warning(f"Dữ liệu không hợp lệ cho embed '{title}'.")
+        return None
+
+    if not processed_users:
+        log.debug(f"Bỏ qua tạo embed '{title}': Không có dữ liệu sau khi xử lý/lọc bot/giá trị min.")
+        return None
+
+    admin_ids_to_filter: Optional[Set[int]] = None
+    if filter_admins:
+        admin_ids_to_filter = {m.id for m in guild.members if m.guild_permissions.administrator}
+        admin_ids_to_filter.update(config.ADMIN_ROLE_IDS_FILTER)
+        if config.ADMIN_USER_ID: admin_ids_to_filter.add(config.ADMIN_USER_ID)
+
+    filtered_sorted_users = [
+        (uid, count_val) for uid, count_val in processed_users
+        if (not filter_admins or not isinstance(uid, int) or not admin_ids_to_filter or uid not in admin_ids_to_filter)
+    ]
+
+    if not filtered_sorted_users:
+        log.debug(f"Bỏ qua tạo embed '{title}': Không có user hợp lệ sau khi lọc.")
+        return None
+
+    total_users_in_lb = len(filtered_sorted_users)
+    users_to_display = filtered_sorted_users[:limit]
+    user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
+    user_cache = await _fetch_user_dict(guild, user_ids_to_fetch, bot)
+
+    title_emoji = e('award') if e('award') != '❓' and not sort_ascending else '📉'
+    embed = discord.Embed(title=f"{title_emoji} {title}", color=color)
+    desc_prefix = "*Đã lọc bot."
+    if filter_admins: desc_prefix += " Đã lọc admin*"
+    if minimum_value is not None: desc_prefix += f" Chỉ tính user có >= {minimum_value} {item_name_plural}."
+
+    bar_chart_str = ""
+    if show_bar_chart:
+        data_for_chart = filtered_sorted_users[:5]
+        # Lọc bỏ giá trị không phải số khỏi chart data
+        numeric_chart_data = [(uid, val) for uid, val in data_for_chart if isinstance(val, (int, float))]
+        if numeric_chart_data:
+            chart_user_ids = [uid for uid, _ in numeric_chart_data]
+            async def format_user_key_for_legend(user_id):
+                user_obj = user_cache.get(user_id)
+                return escape_markdown(user_obj.display_name) if user_obj else f"ID:{user_id}"
+
+            bar_chart_str = await create_vertical_text_bar_chart(
+                sorted_data=numeric_chart_data,
+                key_formatter=format_user_key_for_legend,
+                top_n=5, max_chart_height=8, bar_width=1, bar_spacing=2,
+                chart_title="Top 5", show_legend=True
+            )
+        elif data_for_chart: # Nếu có data nhưng không phải số (vd: chỉ span string)
+            log.debug(f"Không thể vẽ biểu đồ cho '{title}' vì top 5 không có giá trị số.")
+
+
+    description_lines = [desc_prefix]
+    if bar_chart_str: description_lines.append(bar_chart_str)
+    description_lines.append("")
+
+    for rank, (user_id, count_val) in enumerate(users_to_display, 1):
+        secondary_info = None
+        if secondary_info_getter:
+            try:
+                result = secondary_info_getter(user_id, counts) # Truyền counts gốc
+                if asyncio.iscoroutine(result): secondary_info = await result
+                else: secondary_info = result
+            except Exception as e_sec:
+                log.warning(f"Lỗi khi gọi secondary_info_getter cho user {user_id} trong '{title}': {e_sec}")
+        tertiary_info_final = None
+        if tertiary_info_getter:
+            try:
+                result = tertiary_info_getter(user_id, counts) # Truyền counts gốc
+                if asyncio.iscoroutine(result): tertiary_info_final = await result
+                else: tertiary_info_final = result
+            except Exception as e_tert:
+                log.warning(f"Lỗi khi gọi tertiary_info_getter cho user {user_id} trong '{title}': {e_tert}")
+
+        lines = await _format_user_tree_line(
+            rank, user_id, count_val, item_name_singular, item_name_plural,
+            guild, user_cache, secondary_info=secondary_info, tertiary_info=tertiary_info_final
+        )
+        description_lines.extend(lines)
+
+    if description_lines and description_lines[-1] == "": description_lines.pop()
+    final_description = "\n".join(description_lines)
+    if len(final_description) > 4096:
+        cutoff_point = final_description.rfind('\n', 0, 4080)
+        if cutoff_point != -1: final_description = final_description[:cutoff_point] + "\n[...]"
+        else: final_description = final_description[:4090] + "\n[...]"
+    embed.description = final_description
+
+    footer_text = ""
+    if tertiary_info_getter:
+        try:
+            result = tertiary_info_getter(None, None)
+            if asyncio.iscoroutine(result): footer_text = await result
+            else: footer_text = result
+        except Exception: pass
+
+    if total_users_in_lb > limit:
+        footer_add = f"... và {total_users_in_lb - limit} người dùng khác."
+        footer_text = f"{footer_add} | {footer_text}" if footer_text else footer_add
+
+    if footer_text: embed.set_footer(text=footer_text.strip(" | "))
+
+    return embed
 
 # --- END OF FILE utils.py ---

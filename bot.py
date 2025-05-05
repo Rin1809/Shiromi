@@ -4,7 +4,6 @@ import os
 import asyncio
 import logging
 import traceback # Thêm traceback để log lỗi main
-
 import discord
 from discord.ext import commands
 
