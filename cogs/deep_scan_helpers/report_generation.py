@@ -62,18 +62,17 @@ async def _send_report_embeds(scan_data: Dict[str, Any], embed_list: List[discor
 
 # --- Hàm Chính Tạo và Gửi Báo cáo CÔNG KHAI ---
 async def generate_and_send_reports(scan_data: Dict[str, Any]):
-    """Tạo và gửi các báo cáo embeds CÔNG KHAI theo thứ tự mới."""
+    """Tạo và gửi các báo cáo embeds CÔNG KHAI theo thứ tự nhóm Ít/Nhiều."""
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     e = lambda name: utils.get_emoji(name, bot)
     scan_errors: List[str] = scan_data["scan_errors"]
     ctx: commands.Context = scan_data["ctx"]
 
-    log.info(f"\n--- [bold green]{e('loading')} Đang Tạo Báo Cáo Embeds Công Khai (Thứ Tự Mới)[/bold green] ---")
+    log.info(f"\n--- [bold green]{e('loading')} Đang Tạo Báo Cáo Embeds Công Khai (Nhóm Ít/Nhiều)[/bold green] ---")
     start_time_reports = time.monotonic()
 
     # --- Chuẩn bị dữ liệu cần thiết (lấy từ scan_data) ---
-    # (Giữ nguyên phần lấy dữ liệu này)
     user_activity = scan_data["user_activity"]
     user_link_counts = scan_data.get("user_link_counts", Counter())
     user_image_counts = scan_data.get("user_image_counts", Counter())
@@ -92,38 +91,58 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     boosters = scan_data.get("boosters", [])
     tracked_role_grant_counts = scan_data.get("tracked_role_grant_counts", Counter())
     channel_details = scan_data.get("channel_details", [])
-    voice_channel_static_data = scan_data.get("voice_channel_static_data", [])
+    voice_channel_static_data = scan_data.get("voice_channel_static_data", []) # Giữ lại nếu cần
     user_distinct_channel_counts = scan_data.get("user_distinct_channel_counts", Counter())
     server_hourly_activity = scan_data.get("server_hourly_activity", Counter())
     channel_hourly_activity = scan_data.get("channel_hourly_activity", defaultdict(Counter))
     thread_hourly_activity = scan_data.get("thread_hourly_activity", defaultdict(Counter))
-    overall_total_reaction_count = scan_data.get("overall_total_reaction_count", 0)
-    overall_filtered_reaction_count = scan_data.get("overall_total_filtered_reaction_count", 0)
-    user_emoji_received_counts = scan_data.get("user_emoji_received_counts", defaultdict(Counter)) # <<< LẤY DỮ LIỆU MỚI
+    overall_total_reaction_count = scan_data.get("overall_total_reaction_count", 0) # Thô
+    overall_filtered_reaction_count = scan_data.get("overall_total_filtered_reaction_count", 0) # Đã lọc
+    user_emoji_received_counts = scan_data.get("user_emoji_received_counts", defaultdict(Counter))
+    # Thêm dữ liệu emoji content tổng
+    overall_custom_emoji_content_counts = scan_data.get("overall_custom_emoji_content_counts", Counter())
 
 
-    # === KHỐI TẠO VÀ GỬI EMBEDS (THỨ TỰ MỚI) ===
+    # === KHỐI TẠO EMBEDS ===
+    summary_embeds = []
+    analysis_embeds = [] # Nhóm phân tích chung (không bao gồm ít/nhiều)
+    least_activity_embeds = []
+    most_activity_embeds = []
+    special_embeds = []
+    error_embeds = []
 
     # --- Helper tạo và thêm embed ---
-    all_public_embeds = []
     async def _try_create_and_add_embed(embed_creation_func, target_list, error_list, *args, **kwargs):
         func_name = embed_creation_func.__name__
         try:
-            embed = await embed_creation_func(*args, **kwargs)
-            if embed:
-                target_list.append(embed)
+            # Sử dụng await nếu hàm là async, không await nếu là hàm thường
+            if asyncio.iscoroutinefunction(embed_creation_func):
+                embed_or_list = await embed_creation_func(*args, **kwargs)
             else:
-                log.debug(f"Hàm '{func_name}' không tạo ra embed.")
+                embed_or_list = embed_creation_func(*args, **kwargs)
+
+            if isinstance(embed_or_list, list):
+                for embed in embed_or_list:
+                    if isinstance(embed, discord.Embed): target_list.append(embed)
+                    elif embed is not None: log.debug(f"Hàm '{func_name}' trả về phần tử không phải Embed trong list.")
+            elif isinstance(embed_or_list, discord.Embed):
+                target_list.append(embed_or_list)
+            elif embed_or_list is not None:
+                 log.debug(f"Hàm '{func_name}' trả về giá trị không phải Embed hoặc list.")
+
         except Exception as ex:
             error_msg = f"Lỗi tạo embed '{func_name}': {ex}"
             log.error(f"{e('error')} {error_msg}", exc_info=True)
-            error_list.append(error_msg) # Ghi lỗi vào danh sách chung
+            # Ghi lỗi vào danh sách chung (scan_errors) để hiển thị cuối cùng
+            error_list.append(error_msg)
 
-    log.info(f"--- {e('loading')} Đang tạo embeds công khai theo thứ tự yêu cầu ---")
 
-    # 1. Tổng Quan Server
+    log.info(f"--- {e('loading')} Đang tạo các embeds ---")
+
+    # --- Nhóm 1: Tổng Quan & Phân Tích Chung ---
+    log.info(f"--- {e('info')} Nhóm 1: Tổng Quan & Phân Tích Chung ---")
     await _try_create_and_add_embed(
-        embeds_guild.create_summary_embed, all_public_embeds, scan_errors,
+        embeds_guild.create_summary_embed, summary_embeds, scan_errors,
         server, bot, scan_data["processed_channels_count"], scan_data["processed_threads_count"],
         scan_data["skipped_channels_count"], scan_data["skipped_threads_count"],
         scan_data["overall_total_message_count"], len(user_activity), scan_data["overall_duration"],
@@ -131,155 +150,214 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
         len(scan_data["all_roles_list"]), scan_data["overall_start_time"],
         scan_data, ctx=ctx, overall_total_reaction_count=overall_filtered_reaction_count
     )
-
-    # 2. Top Booster Bền Bỉ
+    # Phân tích chung: Keyword & Emoji không dùng
+    await _try_create_and_add_embed( # Hàm này trả về list
+        embeds_analysis.create_keyword_analysis_embeds, analysis_embeds, scan_errors,
+        scan_data.get("keyword_counts", Counter()),
+        scan_data.get("channel_keyword_counts", defaultdict(Counter)),
+        scan_data.get("thread_keyword_counts", defaultdict(Counter)),
+        scan_data.get("user_keyword_counts", defaultdict(Counter)),
+        server, bot, scan_data.get("target_keywords", [])
+    )
     await _try_create_and_add_embed(
-        embeds_user.create_top_booster_embed, all_public_embeds, scan_errors,
-        boosters, bot, scan_data['scan_end_time']
+        embeds_items.create_unused_emoji_embed, analysis_embeds, scan_errors,
+        server, overall_custom_emoji_content_counts, bot
     )
 
-    # 3. Top Emoji Reactions Phổ Biến
-    await _try_create_and_add_embed(
-        embeds_analysis.create_filtered_reaction_embed, all_public_embeds, scan_errors,
-        filtered_reaction_counts, bot=bot
-    )
 
-    # 4. Top Stickers Được Dùng
+    # --- Nhóm 2: Hoạt Động Ít Nhất ---
+    log.info(f"--- {e('info')} Nhóm 2: Hoạt Động Ít Nhất ---")
+    # <<< THÊM GIỜ ÂM, REACTION ÍT, STICKER ÍT >>>
     await _try_create_and_add_embed(
-        embeds_items.create_top_sticker_usage_embed, all_public_embeds, scan_errors,
-        sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data
-    )
-
-    # 5. Hoạt động Kênh
-    await _try_create_and_add_embed(
-        embeds_guild.create_channel_activity_embed, all_public_embeds, scan_errors,
-        guild=server, bot=bot, channel_details=channel_details, voice_channel_static_data=voice_channel_static_data
-    )
-
-    # 6. "Giờ Vàng" của Server
-    await _try_create_and_add_embed(
-        embeds_guild.create_golden_hour_embed, all_public_embeds, scan_errors,
+        embeds_guild.create_umbra_hour_embed, least_activity_embeds, scan_errors,
         server_hourly_activity=server_hourly_activity, channel_hourly_activity=channel_hourly_activity,
         thread_hourly_activity=thread_hourly_activity, guild=server, bot=bot
     )
-
-    # 7. Top User Gửi Tin Nhắn
+    if config.ENABLE_REACTION_SCAN:
+        await _try_create_and_add_embed(
+            embeds_analysis.create_least_filtered_reaction_embed, least_activity_embeds, scan_errors,
+            filtered_reaction_counts, bot=bot
+        )
     await _try_create_and_add_embed(
-        embeds_user.create_top_active_users_embed, all_public_embeds, scan_errors,
+        embeds_items.create_least_sticker_usage_embed, least_activity_embeds, scan_errors,
+        sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data
+    )
+    # <<< KẾT THÚC THÊM >>>
+    await _try_create_and_add_embed(
+        embeds_guild.create_least_channel_activity_embed, least_activity_embeds, scan_errors,
+        guild=server, bot=bot, channel_details=channel_details
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_least_active_users_embed, least_activity_embeds, scan_errors,
         user_activity, guild=server, bot=bot
     )
-
-    # 8. Trả Lời Tin Nhắn
     await _try_create_and_add_embed(
-        embeds_user.create_top_repliers_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_repliers_embed, least_activity_embeds, scan_errors,
         user_reply_counts, guild=server, bot=bot
     )
-
-    # 9. Được Nhắc Tên
     await _try_create_and_add_embed(
-        embeds_user.create_top_mentioned_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_mentioned_users_embed, least_activity_embeds, scan_errors,
         user_mention_received_counts, guild=server, bot=bot
     )
-
-    # 10. Hay Nhắc Tên
     await _try_create_and_add_embed(
-        embeds_user.create_top_mentioning_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_mentioning_users_embed, least_activity_embeds, scan_errors,
         user_mention_given_counts, guild=server, bot=bot
     )
-
-    # 11. Top Người Thả Reaction
+    if config.ENABLE_REACTION_SCAN:
+        await _try_create_and_add_embed(
+            embeds_user.create_least_reaction_givers_embed, least_activity_embeds, scan_errors,
+            user_reaction_given_counts, guild=server, bot=bot
+        )
+        await _try_create_and_add_embed(
+            embeds_user.create_least_reaction_received_users_embed, least_activity_embeds, scan_errors,
+            user_reaction_received_counts, guild=server, bot=bot
+        )
     await _try_create_and_add_embed(
-        embeds_analysis.create_top_reaction_givers_embed, all_public_embeds, scan_errors,
-        user_reaction_given_counts, user_reaction_emoji_given_counts, scan_data, server, bot
-    )
-
-    # 12. Nhận Reactions
-    await _try_create_and_add_embed(
-        embeds_user.create_top_reaction_received_users_embed, all_public_embeds, scan_errors,
-        user_reaction_received_counts, # Counter tổng reaction nhận
-        guild=server,
-        bot=bot,
-        user_emoji_received_counts=user_emoji_received_counts, # <<< TRUYỀN DỮ LIỆU MỚI
-        scan_data=scan_data # <<< TRUYỀN scan_data để lấy emoji cache
-    )
-
-    # 13. Top User Dùng Custom Emoji Server
-    await _try_create_and_add_embed(
-        embeds_user.create_top_custom_emoji_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_custom_emoji_users_embed, least_activity_embeds, scan_errors,
         scan_data, guild=server, bot=bot
     )
-
-    # 14. Top User Gửi Sticker
     await _try_create_and_add_embed(
-        embeds_user.create_top_sticker_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_sticker_users_embed, least_activity_embeds, scan_errors,
         scan_data, guild=server, bot=bot
     )
-
-    # 15. Gửi Link
     await _try_create_and_add_embed(
-        embeds_user.create_top_link_posters_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_link_posters_embed, least_activity_embeds, scan_errors,
         user_link_counts, guild=server, bot=bot
     )
-
-    # 16. Gửi Ảnh (Sửa: Đổi tên param thành user_image_counts)
     await _try_create_and_add_embed(
-        embeds_user.create_top_image_posters_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_image_posters_embed, least_activity_embeds, scan_errors,
         user_image_counts, guild=server, bot=bot
     )
-
-    # 17. Top "Người Đa Năng"
     await _try_create_and_add_embed(
-        embeds_user.create_top_distinct_channel_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_distinct_channel_users_embed, least_activity_embeds, scan_errors,
         scan_data, guild=server, bot=bot
     )
-
-    # 18. Top Thành Viên Lâu Năm Nhất
     await _try_create_and_add_embed(
-        embeds_user.create_top_oldest_members_embed, all_public_embeds, scan_errors,
-        oldest_members_data, scan_data=scan_data, guild=server, bot=bot
-    )
-
-    # 19. Top User Hoạt Động Lâu Nhất (Span)
-    await _try_create_and_add_embed(
-        embeds_user.create_top_activity_span_users_embed, all_public_embeds, scan_errors,
+        embeds_user.create_least_activity_span_users_embed, least_activity_embeds, scan_errors,
         user_activity, guild=server, bot=bot
     )
+    await _try_create_and_add_embed(
+        embeds_user.create_least_thread_creators_embed, least_activity_embeds, scan_errors,
+        user_thread_creation_counts, guild=server, bot=bot
+    )
 
-    # --- Gửi batch embed chính ---
-    if all_public_embeds:
-        await _send_report_embeds(scan_data, all_public_embeds, "Báo cáo Công khai Tổng hợp")
-    else:
-        log.warning("Không có embed công khai nào được tạo để gửi.")
 
-    # --- GỬI CÁC EMBED PHỤ (KHÔNG THAY ĐỔI) ---
+    # --- Nhóm 3: Hoạt Động Nhiều Nhất ---
+    log.info(f"--- {e('info')} Nhóm 3: Hoạt Động Nhiều Nhất ---")
+    # <<< THÊM EMOJI CONTENT, GIỜ VÀNG, REACTION NHIỀU, STICKER NHIỀU >>>
+    await _try_create_and_add_embed(
+        embeds_analysis.create_top_content_emoji_embed, most_activity_embeds, scan_errors,
+        overall_custom_emoji_content_counts, bot=bot, guild=server
+    )
+    await _try_create_and_add_embed(
+        embeds_guild.create_golden_hour_embed, most_activity_embeds, scan_errors,
+        server_hourly_activity=server_hourly_activity, channel_hourly_activity=channel_hourly_activity,
+        thread_hourly_activity=thread_hourly_activity, guild=server, bot=bot
+    )
+    if config.ENABLE_REACTION_SCAN:
+        await _try_create_and_add_embed(
+            embeds_analysis.create_filtered_reaction_embed, most_activity_embeds, scan_errors,
+            filtered_reaction_counts, bot=bot
+        )
+    await _try_create_and_add_embed(
+        embeds_items.create_top_sticker_usage_embed, most_activity_embeds, scan_errors,
+        sticker_usage_counts, bot=bot, guild=server, scan_data=scan_data
+    )
+    # <<< KẾT THÚC THÊM >>>
+    await _try_create_and_add_embed(
+        embeds_guild.create_channel_activity_embed, most_activity_embeds, scan_errors,
+        guild=server, bot=bot, channel_details=channel_details
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_active_users_embed, most_activity_embeds, scan_errors,
+        user_activity, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_repliers_embed, most_activity_embeds, scan_errors,
+        user_reply_counts, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_mentioned_users_embed, most_activity_embeds, scan_errors,
+        user_mention_received_counts, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_mentioning_users_embed, most_activity_embeds, scan_errors,
+        user_mention_given_counts, guild=server, bot=bot
+    )
+    if config.ENABLE_REACTION_SCAN:
+        await _try_create_and_add_embed(
+            embeds_analysis.create_top_reaction_givers_embed, most_activity_embeds, scan_errors,
+            user_reaction_given_counts, user_reaction_emoji_given_counts, scan_data, server, bot
+        )
+        await _try_create_and_add_embed(
+            embeds_user.create_top_reaction_received_users_embed, most_activity_embeds, scan_errors,
+            user_reaction_received_counts, guild=server, bot=bot,
+            user_emoji_received_counts=user_emoji_received_counts, scan_data=scan_data
+        )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_custom_emoji_users_embed, most_activity_embeds, scan_errors,
+        scan_data, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_sticker_users_embed, most_activity_embeds, scan_errors,
+        scan_data, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_link_posters_embed, most_activity_embeds, scan_errors,
+        user_link_counts, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_image_posters_embed, most_activity_embeds, scan_errors,
+        user_image_counts, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_distinct_channel_users_embed, most_activity_embeds, scan_errors,
+        scan_data, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_activity_span_users_embed, most_activity_embeds, scan_errors,
+        user_activity, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_thread_creators_embed, most_activity_embeds, scan_errors,
+        user_thread_creation_counts, guild=server, bot=bot
+    )
 
-    # --- Nhóm 5: BXH Danh hiệu Đặc biệt ---
-    log.info(f"--- {e('crown')} Nhóm 5: BXH Danh hiệu Đặc biệt ---")
-    group5_embeds = []
-    try:
-         temp_tracked_embeds = await embeds_analysis.create_tracked_role_grant_leaderboards(tracked_role_grant_counts, server, bot)
-         if temp_tracked_embeds: group5_embeds.extend(temp_tracked_embeds)
-         elif config.TRACKED_ROLE_GRANT_IDS: log.debug("Hàm 'create_tracked_role_grant_leaderboards' (Nhóm 5) không tạo ra embed.")
-    except Exception as ex_trg:
-        error_msg = f"Lỗi embed BXH danh hiệu (Nhóm 5): {ex_trg}"
-        log.error(f"{e('error')} {error_msg}", exc_info=True)
-        scan_errors.append(error_msg)
-    if group5_embeds:
-        await _send_report_embeds(scan_data, group5_embeds, "Nhóm 5: BXH Danh hiệu Đặc biệt")
+    # --- Nhóm 4: BXH Đặc Biệt & Danh Hiệu ---
+    log.info(f"--- {e('info')} Nhóm 4: BXH Đặc Biệt & Danh Hiệu ---")
+    await _try_create_and_add_embed(
+        embeds_items.create_top_inviters_embed, special_embeds, scan_errors,
+        scan_data.get("invite_usage_counts", Counter()), guild=server, bot=bot
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_booster_embed, special_embeds, scan_errors,
+        boosters, bot, scan_data['scan_end_time']
+    )
+    await _try_create_and_add_embed(
+        embeds_user.create_top_oldest_members_embed, special_embeds, scan_errors,
+        oldest_members_data, scan_data=scan_data, guild=server, bot=bot
+    )
+    await _try_create_and_add_embed( # Hàm này trả về list
+        embeds_analysis.create_tracked_role_grant_leaderboards, special_embeds, scan_errors,
+        tracked_role_grant_counts, server, bot
+    )
 
-    # --- Nhóm 6: Báo cáo Tóm tắt Lỗi ---
-    log.info(f"--- {e('warning')} Nhóm 6: Báo cáo Lỗi ---")
-    group6_embeds = []
-    try:
-        embed_err = await embeds_analysis.create_error_embed(scan_errors, bot=bot)
-        if embed_err: group6_embeds.append(embed_err)
-    except Exception as ex_err:
-        error_msg = f"Lỗi embed create_error_embed (Nhóm 6): {ex_err}"
-        log.error(f"{e('error')} {error_msg}", exc_info=True)
-        scan_errors.append(error_msg)
+    # --- Nhóm 5: Báo cáo Lỗi ---
+    log.info(f"--- {e('warning')} Nhóm 5: Báo cáo Lỗi ---")
+    await _try_create_and_add_embed(
+        embeds_analysis.create_error_embed, error_embeds, scan_errors,
+        scan_errors, bot=bot # Truyền scan_errors vào args
+    )
 
-    if group6_embeds:
-        await _send_report_embeds(scan_data, group6_embeds, "Nhóm 6: Tóm tắt Lỗi")
+
+    # === GỬI EMBEDS THEO THỨ TỰ ===
+    log.info(f"--- {e('loading')} Đang gửi các embeds ---")
+    if summary_embeds: await _send_report_embeds(scan_data, summary_embeds, "Nhóm 1: Tổng Quan Server")
+    if analysis_embeds: await _send_report_embeds(scan_data, analysis_embeds, "Nhóm 1: Phân Tích Chung")
+    if least_activity_embeds: await _send_report_embeds(scan_data, least_activity_embeds, "Nhóm 2: Hoạt Động Ít Nhất")
+    if most_activity_embeds: await _send_report_embeds(scan_data, most_activity_embeds, "Nhóm 3: Hoạt Động Nhiều Nhất")
+    if special_embeds: await _send_report_embeds(scan_data, special_embeds, "Nhóm 4: BXH Đặc Biệt & Danh Hiệu")
+    if error_embeds: await _send_report_embeds(scan_data, error_embeds, "Nhóm 5: Tóm tắt Lỗi")
     elif scan_errors: log.error(f"Có {len(scan_errors)} lỗi nhưng không thể tạo embed báo cáo lỗi.")
     else: log.info("Không có lỗi nào được ghi nhận trong quá trình quét.")
 
