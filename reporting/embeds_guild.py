@@ -93,19 +93,38 @@ async def create_summary_embed(
     summary_embed.add_field(name="🧑‍🤝‍🧑 Users", value=f"{member_count_real:,}", inline=True)
     summary_embed.add_field(name=f"{e('bot_tag')} Bots", value=f"{bot_count_scan:,}", inline=True)
 
-    channel_stats_lines = [
-        f"{utils.get_channel_type_emoji(discord.ChannelType.text, bot)} Text: {channel_counts.get(discord.ChannelType.text, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.voice, bot)} Voice: {channel_counts.get(discord.ChannelType.voice, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.category, bot)} Cat: {channel_counts.get(discord.ChannelType.category, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.stage_voice, bot)} Stage: {channel_counts.get(discord.ChannelType.stage_voice, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.forum, bot)} Forum: {channel_counts.get(discord.ChannelType.forum, 0)}",
-        f"{utils.get_channel_type_emoji(discord.ChannelType.public_thread, bot)} Thread: {processed_threads_count}"
+    # --- Phần hiển thị kênh được cải thiện ---
+    channel_stats_lines = []
+    # Các loại kênh chính muốn hiển thị
+    types_to_show = [
+        discord.ChannelType.text,
+        discord.ChannelType.voice,
+        discord.ChannelType.category,
+        discord.ChannelType.stage_voice,
+        discord.ChannelType.forum,
+        # discord.ChannelType.news # Có thể thêm nếu cần
     ]
+    total_channels_from_counter = 0
+    for chan_type in types_to_show:
+        count = channel_counts.get(chan_type, 0)
+        total_channels_from_counter += count # Cộng dồn số lượng kênh
+        emoji = utils.get_channel_type_emoji(chan_type, bot)
+        # Lấy tên loại kênh và định dạng
+        type_name = chan_type.name.replace('_', ' ').title()
+        channel_stats_lines.append(f"{emoji} {type_name}: **{count}**")
+
+    # Thêm số lượng Thread (luồng) đã quét
+    thread_emoji = utils.get_channel_type_emoji(discord.ChannelType.public_thread, bot) # Dùng emoji của public thread
+    channel_stats_lines.append(f"{thread_emoji} Threads (Đã quét): **{processed_threads_count}**")
+
+    # Thêm field mới vào embed
     summary_embed.add_field(
-        name=f"{e('info')} Kênh ({sum(channel_counts.values())}) & Luồng",
-        value=" | ".join(channel_stats_lines),
-        inline=False
+        name=f"{e('info')} Phân Loại Kênh ({total_channels_from_counter}) & Luồng", # Hiển thị tổng số kênh từ counter
+        value="\n".join(channel_stats_lines), # Nối các dòng bằng newline
+        inline=False # Để field này chiếm toàn bộ chiều rộng
     )
+    # --- Kết thúc phần cải thiện ---
+
 
     summary_embed.add_field(
         name=f"{e('star')} Điểm Nhấn Server",
@@ -258,8 +277,6 @@ async def create_least_channel_activity_embed(
         color=discord.Color.light_grey()
     )
 
-    # Không thêm biểu đồ cho BXH "ít nhất"
-
     text_field_value = "\n".join(least_text_lines) if least_text_lines else "*Không có kênh text nào phù hợp*"
     embed.add_field(
         name=f"{utils.get_channel_type_emoji(discord.ChannelType.text, bot)} Kênh Text",
@@ -312,7 +329,6 @@ async def create_golden_hour_embed(
 
     sorted_server_hours = sorted(hourly_grouped.items(), key=lambda item: item[1], reverse=True)
 
-    # --- Biểu đồ giờ vàng server ---
     bar_chart_server_str = ""
     data_for_chart_server = sorted_server_hours[:5]
     if data_for_chart_server:
@@ -328,10 +344,10 @@ async def create_golden_hour_embed(
          bar_chart_server_str = await utils.create_vertical_text_bar_chart(
              sorted_data=data_for_chart_server,
              key_formatter=format_hour_key,
-             top_n=5, max_chart_height=6, bar_width=1, bar_spacing=1, # Chart nhỏ hơn
+             top_n=5, max_chart_height=6, bar_width=1, bar_spacing=1,
              chart_title="Top Khung Giờ Server", show_legend=True
          )
-         embed.description = bar_chart_server_str # Đặt chart lên đầu
+         embed.description = bar_chart_server_str
     else:
         embed.description = "*Khung giờ server và các kênh/chủ đề có nhiều tin nhắn nhất.*"
 
@@ -406,7 +422,7 @@ async def create_golden_hour_embed(
         value="\n".join(location_golden_lines) if location_golden_lines else "Không có dữ liệu.",
         inline=False
     )
-    if len(embed.description) > 4096: embed.description = embed.description[:4090] + "\n[...]"
+    if embed.description and len(embed.description) > 4096: embed.description = embed.description[:4090] + "\n[...]"
     return embed
 
 
@@ -445,8 +461,6 @@ async def create_umbra_hour_embed(
         return None
 
     sorted_server_hours = sorted(hourly_grouped.items(), key=lambda item: item[1])
-
-    # Không vẽ biểu đồ cho giờ âm
 
     server_umbra_lines = []
     for rank, (start_hour, count) in enumerate(sorted_server_hours, 1):

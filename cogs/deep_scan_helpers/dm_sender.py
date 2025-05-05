@@ -9,14 +9,14 @@ from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from collections import Counter, defaultdict
 import collections
 
-import config
+import config # Import config đã cập nhật
 import utils
 from reporting import embeds_dm
 
 log = logging.getLogger(__name__)
 
-# Hằng số delay (tính bằng giây)
-DELAY_BETWEEN_USERS = 3.5 # Giữ delay để tránh spam admin quá nhanh
+# Constants giữ nguyên
+DELAY_BETWEEN_USERS = 3.5
 DELAY_BETWEEN_MESSAGES = 0.8
 DELAY_BETWEEN_EMBEDS = 1.8
 DELAY_ON_HTTP_ERROR = 5.0
@@ -25,7 +25,7 @@ DELAY_ON_UNKNOWN_ERROR = 3.0
 
 # --- Hàm _prepare_ranking_data giữ nguyên ---
 async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild) -> Dict[str, Dict[int, int]]:
-
+    # ... (Giữ nguyên toàn bộ code của hàm này) ...
     rankings: Dict[str, Dict[int, int]] = {}
     e = lambda name: utils.get_emoji(name, scan_data["bot"]) # Hàm lấy emoji
 
@@ -151,7 +151,6 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     end_rank_time = time.monotonic()
     log.debug(f"{e('success')} Hoàn thành tính toán dữ liệu xếp hạng ({len(rankings)} BXH) trong {end_rank_time - start_rank_time:.2f}s.")
     return rankings
-# --- Kết thúc hàm _prepare_ranking_data ---
 
 
 async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mode: bool):
@@ -162,11 +161,13 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     recipient_role_id: Optional[int] = config.DM_REPORT_RECIPIENT_ROLE_ID
     thank_you_role_ids: Set[int] = config.BOOSTER_THANKYOU_ROLE_IDS
     admin_user_id: Optional[int] = config.ADMIN_USER_ID
+    quy_toc_anh_mapping: Dict[str, str] = config.QUY_TOC_ANH_MAPPING # Lấy mapping từ config
 
-    is_test_mode = is_testing_mode # Dùng trực tiếp tham số
+    is_test_mode = is_testing_mode
     log.debug(f"[DM Sender] Explicit is_testing_mode received = {is_test_mode}")
 
     # --- Lấy đối tượng admin (luôn cần nếu test mode) ---
+    # ... (Giữ nguyên code lấy admin_member, admin_dm_channel) ...
     admin_member: Optional[discord.Member] = None
     admin_dm_channel: Optional[discord.DMChannel] = None
     if is_test_mode:
@@ -195,7 +196,8 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
              scan_data["scan_errors"].append(f"Test DM thất bại: Lỗi fetch Admin ({admin_user_id}).")
              return
 
-    # --- Xác định danh sách thành viên cần xử lý (để tạo báo cáo) ---
+    # --- Xác định danh sách thành viên cần xử lý ---
+    # ... (Giữ nguyên code xác định members_to_process và process_description) ...
     members_to_process: List[discord.Member] = []
     process_description = ""
     if recipient_role_id:
@@ -207,35 +209,30 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
         else:
             log.error(f"Không tìm thấy role nhận DM với ID: {recipient_role_id}.")
             scan_data["scan_errors"].append(f"Không tìm thấy Role nhận DM ({recipient_role_id}).")
-            # Có thể dừng hoặc tiếp tục nếu test mode
-            if not is_test_mode:
-                return # Dừng nếu chạy bình thường mà không có role
+            if not is_test_mode: return
     else:
-        # Nếu không có role ID, và đang ở chế độ bình thường -> không làm gì
         if not is_test_mode:
             log.info("Không có ID role nhận DM được cấu hình, bỏ qua gửi DM.")
             return
-        # Nếu không có role ID, và đang test mode -> Lấy TẤT CẢ user không phải bot làm đối tượng xử lý
         log.warning("Không có role nhận DM được cấu hình, Test Mode sẽ xử lý TẤT CẢ user (không phải bot).")
         members_to_process = [m for m in guild.members if not m.bot]
         process_description = "tất cả thành viên (không phải bot)"
-
 
     if not members_to_process:
         log.info(f"Không tìm thấy {process_description} để xử lý báo cáo DM.")
         return
 
     if is_test_mode:
-        log.info(f"Chế độ Test: Sẽ tạo và gửi {len(members_to_process)} báo cáo của {process_description} đến Admin ({admin_member.display_name}).")
+        log.info(f"Chế độ Test: Sẽ tạo và gửi {len(members_to_process)} báo cáo của {process_description} đến Admin ({admin_member.display_name if admin_member else 'N/A'}).")
     else:
         log.info(f"Chuẩn bị gửi DM báo cáo cho {len(members_to_process)} {process_description}.")
 
-    # Lấy danh sách Role objects cho việc cảm ơn
+    # --- Lấy Role Objects cho việc cảm ơn ---
     thank_you_roles: Set[discord.Role] = {guild.get_role(rid) for rid in thank_you_role_ids if guild.get_role(rid)}
     if thank_you_roles:
         log.info(f"Lời cảm ơn đặc biệt sẽ được thêm cho các role: {[r.name for r in thank_you_roles]}")
 
-    # --- Chuẩn bị dữ liệu xếp hạng MỘT LẦN ---
+    # --- Chuẩn bị dữ liệu xếp hạng ---
     ranking_data = await _prepare_ranking_data(scan_data, guild)
 
     # --- Bắt đầu gửi DM ---
@@ -243,30 +240,27 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     failed_dm_count = 0
     processed_members_count = 0
 
-    # *** VÒNG LẶP CHÍNH: Luôn lặp qua members_to_process ***
     for member in members_to_process:
         processed_members_count += 1
         log.info(f"{e('loading')} ({processed_members_count}/{len(members_to_process)}) Đang tạo báo cáo cho {member.display_name} ({member.id})...")
 
-        # Danh sách tin nhắn và embeds để gửi CHO USER NÀY
         messages_to_send: List[str] = []
         embeds_to_send: List[discord.Embed] = []
 
         # --- Xác định đích gửi DM ---
+        # ... (Giữ nguyên code xác định target_dm_channel, target_description_log, is_sending_to_admin) ...
         target_dm_channel: Optional[Union[discord.DMChannel, Any]] = None
         target_description_log = "" # Để log cho rõ
         is_sending_to_admin = False # Cờ để biết có cần thêm prefix không
 
         if is_test_mode:
             target_dm_channel = admin_dm_channel # Đã lấy ở trên
-            target_description_log = f"Admin ({admin_member.id})"
+            target_description_log = f"Admin ({admin_member.id if admin_member else 'N/A'})"
             is_sending_to_admin = True
-            # Thêm tiền tố vào tin nhắn đầu tiên để biết báo cáo này của ai
             test_prefix = f"```---\n📝 Báo cáo Test cho: {member.display_name} ({member.id})\n---```\n"
             messages_to_send.append(test_prefix)
         else:
             try:
-                # Lấy DM channel của thành viên hiện tại
                 target_dm_channel = member.dm_channel or await member.create_dm()
                 target_description_log = f"User {member.id}"
             except discord.Forbidden:
@@ -280,7 +274,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                  await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
                  continue # Sang user tiếp theo
 
-        # Nếu không lấy được target channel (kể cả admin), bỏ qua
         if not target_dm_channel:
             log.error(f"Không thể xác định kênh DM đích cho {member.display_name}. Bỏ qua.")
             failed_dm_count +=1
@@ -289,25 +282,36 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
         # --- Tạo nội dung báo cáo cho 'member' hiện tại ---
         try:
             user_has_thank_you_role = any(role in member.roles for role in thank_you_roles)
-            # Tạo tin nhắn chào mừng/cảm ơn (Logic cũ giữ nguyên)
-            image_url = "https://cdn.discordapp.com/attachments/1141675354470223887/1368708955911753751/image.png?ex=6819350c&is=6817e38c&hm=2152f8ecd42616638d092986066d6123338aea5e8c485fc3153d52d2f9ede2d5&" # <--- Lưu URL ảnh (đã bỏ & thừa)
+            # Lấy URL ảnh riêng nếu user có role và có trong mapping
+            personalized_image_url: Optional[str] = None
+            if user_has_thank_you_role:
+                personalized_image_url = quy_toc_anh_mapping.get(str(member.id))
+                if personalized_image_url:
+                    log.debug(f"Đã tìm thấy ảnh cá nhân cho {member.display_name} ({member.id})")
+                else:
+                    log.debug(f"Không tìm thấy ảnh cá nhân cho {member.display_name} ({member.id}) trong mapping.")
 
             # Tạo tin nhắn chào mừng/cảm ơn
+            default_image_url = "https://cdn.discordapp.com/attachments/1141675354470223887/1368708955911753751/image.png?ex=6819350c&is=6817e38c&hm=2152f8ecd42616638d092986066d6123338aea5e8c485fc3153d52d2f9ede2d5&" # URL ảnh mặc định
+            image_to_send = personalized_image_url # Ưu tiên ảnh cá nhân
+
             if user_has_thank_you_role:
                 thank_you_title = f"💖 Cảm ơn bạn đã là một phần tuyệt vời của {guild.name}! 💖"
                 thank_you_body = (
-                     f"🎀 | Chào cậu, {member.mention},\n\n"
-                     f"Đầu tiên, thay mặt Rin - Misuzu và mọi người **{guild.name}**, bọn tớ xin gửi lời cảm ơn cậu vì đã **đóng góp/boost** cho server! ✨\n\n"
-                     f"Sự đóng góp của cậu giúp server ngày càng phát triển và duy trì một môi trường tuyệt vời cho tất cả mọi người á. \n\n"
-                     f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ! \n\n"
-                     f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này... \n\n"
-                     f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á \n\n"
-                     f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
-                     f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
-                     f"# ᓚᘏᗢ"
-                 )
+                    f"🎀 | Chào cậu, {member.mention},\n\n"
+                    f"Đầu tiên, thay mặt Rin - Misuzu và mọi người **{guild.name}**, bọn tớ xin gửi lời cảm ơn cậu vì đã **đóng góp/boost** cho server! ✨\n\n"
+                    f"Sự đóng góp của cậu giúp server ngày càng phát triển và duy trì một môi trường tuyệt vời cho tất cả mọi người á. \n\n"
+                    f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ! \n\n"
+                    f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này... \n\n"
+                    f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á \n\n"
+                    f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
+                    f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
+                    f"# ᓚᘏᗢ"
+                )
                 messages_to_send.append(thank_you_title + "\n\n" + thank_you_body)
-                messages_to_send.append(image_url)
+                # Chỉ gửi ảnh mặc định nếu KHÔNG CÓ ảnh cá nhân
+                if not image_to_send:
+                    image_to_send = default_image_url
             else:
                  greeting_msg = (
                      f"📊 Chào cậu {member.mention}, \n\n"
@@ -319,17 +323,18 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                      f"# ᓚᘏᗢ"
                  )
                  messages_to_send.append(greeting_msg)
-                 # THÊM LINK ẢNH NHƯ TIN NHẮN RIÊNG (cho cả người không có role cảm ơn)
-                 messages_to_send.append(image_url)
+                 # Người thường luôn nhận ảnh mặc định (nếu có)
+                 image_to_send = default_image_url
 
-            # --- KẾT THÚC SỬA ĐỔI ---
+            # Thêm URL ảnh (cá nhân hoặc mặc định) vào danh sách tin nhắn để gửi
+            if image_to_send:
+                messages_to_send.append(image_to_send)
 
-            # Tạo Embed Hoạt Động Cá Nhân (Gọi hàm đã nâng cấp)
+            # --- Tạo Embeds ---
             personal_activity_embed = await embeds_dm.create_personal_activity_embed(member, scan_data, bot, ranking_data)
             if personal_activity_embed: embeds_to_send.append(personal_activity_embed)
             else: log.warning(f"Không thể tạo personal_activity_embed cho {member.display_name}")
 
-            # Tạo Embed Thành Tích & So Sánh (Gọi hàm đã nâng cấp)
             achievements_embed = await embeds_dm.create_achievements_embed(member, scan_data, bot, ranking_data)
             if achievements_embed: embeds_to_send.append(achievements_embed)
             else: log.warning(f"Không thể tạo achievements_embed cho {member.display_name}")
@@ -338,7 +343,8 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             final_message = f"Đây là báo cáo tự động được tạo bởi {config.BOT_NAME}. Báo cáo này chỉ dành cho cậu. Chúc cậu một ngày vui vẻ! 🎉"
             messages_to_send.append(final_message)
 
-            # --- Gửi DM đến target_dm_channel ---
+            # --- Gửi DM ---
+            # ... (Giữ nguyên code gửi DM, xử lý lỗi, delay) ...
             if not embeds_to_send and not messages_to_send:
                 log.warning(f"Không có nội dung DM để gửi cho {member.display_name}.")
                 failed_dm_count += 1
@@ -348,7 +354,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 # Gửi tin nhắn text trước
                 for msg_content in messages_to_send:
                     if msg_content:
-                        # Chỉ gửi nếu target channel vẫn còn hợp lệ
                         if target_dm_channel:
                             await target_dm_channel.send(content=msg_content)
                             await asyncio.sleep(DELAY_BETWEEN_MESSAGES)
@@ -359,7 +364,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 # Gửi embeds sau
                 for embed in embeds_to_send:
                     if isinstance(embed, discord.Embed):
-                        # Chỉ gửi nếu target channel vẫn còn hợp lệ
                         if target_dm_channel:
                             await target_dm_channel.send(embed=embed)
                             await asyncio.sleep(DELAY_BETWEEN_EMBEDS)
@@ -374,18 +378,15 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 log.warning(f"❌ Không thể gửi DM đến {target_description_log} (cho báo cáo của {member.id}): User/Admin đã chặn DM hoặc bot.")
                 failed_dm_count += 1
                 await asyncio.sleep(DELAY_ON_FORBIDDEN)
-                # Nếu là test mode và lỗi gửi đến admin -> dừng hẳn việc gửi test
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Không thể gửi Test DM đến Admin. Dừng gửi DM.")
                     scan_data["scan_errors"].append("Test DM thất bại: Không thể gửi DM đến Admin (Forbidden).")
                     return # Dừng hẳn hàm
-                # Nếu là chế độ thường, chỉ continue
                 target_dm_channel = None # Đánh dấu channel không hợp lệ
             except discord.HTTPException as dm_http_err:
                 log.error(f"❌ Lỗi HTTP {dm_http_err.status} khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_http_err.text}")
                 failed_dm_count += 1
                 await asyncio.sleep(DELAY_ON_HTTP_ERROR)
-                # Nếu là test mode và lỗi HTTP -> dừng hẳn
                 if is_test_mode and dm_http_err.status != 429: # Cho phép retry nếu chỉ là rate limit
                      log.error("LỖI NGHIÊM TRỌNG: Lỗi HTTP khi gửi Test DM đến Admin. Dừng gửi DM.")
                      scan_data["scan_errors"].append(f"Test DM thất bại: Lỗi HTTP {dm_http_err.status} khi gửi đến Admin.")
@@ -395,14 +396,13 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 log.error(f"❌ Lỗi không xác định khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_err}", exc_info=True)
                 failed_dm_count += 1
                 await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
-                # Nếu là test mode và lỗi lạ -> dừng hẳn 
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Lỗi không xác định khi gửi Test DM đến Admin. Dừng gửi DM.")
                     scan_data["scan_errors"].append("Test DM thất bại: Lỗi không xác định khi gửi đến Admin.")
                     return
                 target_dm_channel = None # Đánh dấu channel không hợp lệ
 
-            # Delay chung giữa các user (kể cả khi gửi test cho admin)
+            # Delay chung giữa các user
             await asyncio.sleep(DELAY_BETWEEN_USERS)
 
         except Exception as user_proc_err:
@@ -410,11 +410,12 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             failed_dm_count += 1
             await asyncio.sleep(DELAY_ON_UNKNOWN_ERROR)
 
+    # --- Log kết thúc ---
+    # ... (Giữ nguyên code log kết quả gửi DM) ...
     log.info(f"--- {e('success')} Hoàn tất gửi DM báo cáo ---")
     mode_str = "Test Mode (gửi đến Admin)" if is_test_mode else "Normal Mode"
     log.info(f"Chế độ: {mode_str}")
     log.info(f"Tổng cộng: {sent_dm_count} thành công, {failed_dm_count} thất bại.")
     if failed_dm_count > 0:
         scan_data["scan_errors"].append(f"Gửi DM ({mode_str}) thất bại cho {failed_dm_count} báo cáo.")
-
 # --- END OF FILE cogs/deep_scan_helpers/dm_sender.py ---
