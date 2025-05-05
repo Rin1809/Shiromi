@@ -169,6 +169,7 @@ async def create_csv_report(
     user_reaction_emoji_given_counts: Optional[defaultdict] = None, # Thêm mới
     user_other_file_counts: Optional[collections.Counter] = None,
     user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None,
+    user_emoji_received_counts: Optional[defaultdict] = None # Thêm mới cho CSV
 ) -> None:
     log.info("💾 Bắt đầu tạo các file CSV chính và phụ...")
     start_time = time.monotonic()
@@ -194,7 +195,7 @@ async def create_csv_report(
     try: await _create_static_voice_stage_csv(voice_channel_static_data, files_list_ref)
     except Exception as ex: log.error(f"‼️ LỖI tạo static_voice_stage_channels.csv: {ex}", exc_info=True)
 
-    try: await _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel, user_reaction_given_counts) # Thêm reaction_given
+    try: await _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel, user_reaction_given_counts, user_emoji_received_counts) # Thêm reaction_given và emoji_received
     except Exception as ex: log.error(f"‼️ LỖI tạo user_activity_detail.csv: {ex}", exc_info=True)
 
     try: await _create_roles_detail_csv(roles, files_list_ref)
@@ -341,12 +342,20 @@ async def _create_static_voice_stage_csv(voice_channel_static_data, files_list_r
     rows = [[vc.get('id'), vc.get('name'), vc.get('type'), vc.get('category_id'), vc.get('category'), vc.get('created_at').isoformat() if vc.get('created_at') else None, vc.get('user_limit'), utils.parse_bitrate(str(vc.get('bitrate','0')))] for vc in voice_channel_static_data]
     await _write_csv_to_list("static_voice_stage_channels.csv", headers, rows, files_list_ref)
 
-async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct_channel_counts, user_total_custom_emoji_content_counts, user_most_active_channel, user_reaction_given_counts):
+async def _create_user_activity_csv(
+    user_activity, files_list_ref, user_distinct_channel_counts,
+    user_total_custom_emoji_content_counts, user_most_active_channel,
+    user_reaction_given_counts,
+    # <<< THÊM THAM SỐ MỚI >>>
+    user_emoji_received_counts: Optional[defaultdict] = None
+):
     headers = [
         "User ID", "Is Bot", "Message Count", "Link Count", "Image Count", "Other File Count",
         "Emoji (Content) Count", "Custom Emoji Server (Content) Count",
         "Sticker Sent Count", "Mention Given Count", "Distinct Mention Given Count",
-        "Mention Received Count", "Reply Count", "Reaction Received Count (Filtered)", "Reaction Given Count (Filtered)", # Cập nhật header
+        "Mention Received Count", "Reply Count", "Reaction Received Count (Filtered)",
+        "Reaction Given Count (Filtered)",
+        "Top Emoji Received Key", # <<< THÊM HEADER MỚI >>>
         "Distinct Channels Messaged", "Most Active Location ID", "Most Active Location Msg Count",
         "First Seen UTC", "Last Seen UTC", "Activity Span (s)"
     ]
@@ -362,6 +371,17 @@ async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct
         most_active_count = most_active_data[1] if most_active_data else 0
         reaction_given_count = user_reaction_given_counts.get(user_id, 0) if user_reaction_given_counts else 0
 
+        # <<< TÌM TOP EMOJI NHẬN CHO CSV >>>
+        top_emoji_received_key = "N/A"
+        if user_emoji_received_counts:
+            user_specific_counts = user_emoji_received_counts.get(user_id, Counter())
+            if user_specific_counts:
+                try:
+                    most_received_key, _ = user_specific_counts.most_common(1)[0]
+                    top_emoji_received_key = str(most_received_key) # Lưu key (ID hoặc Unicode)
+                except (ValueError, IndexError): pass
+        # <<< KẾT THÚC TÌM TOP EMOJI >>>
+
         rows.append([
             user_id, data.get('is_bot', False), data.get('message_count', 0),
             data.get('link_count', 0), data.get('image_count', 0), data.get('other_file_count', 0),
@@ -369,7 +389,8 @@ async def _create_user_activity_csv(user_activity, files_list_ref, user_distinct
             data.get('sticker_count', 0),
             data.get('mention_given_count', 0), distinct_mentions_given,
             data.get('mention_received_count', 0), data.get('reply_count', 0),
-            data.get('reaction_received_count', 0), reaction_given_count, # Thêm cột mới
+            data.get('reaction_received_count', 0), reaction_given_count,
+            top_emoji_received_key, # <<< THÊM DỮ LIỆU CỘT MỚI >>>
             distinct_channels, most_active_id, most_active_count,
             first_seen.isoformat() if first_seen else None,
             last_seen.isoformat() if last_seen else None,

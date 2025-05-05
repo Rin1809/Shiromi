@@ -99,6 +99,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     thread_hourly_activity = scan_data.get("thread_hourly_activity", defaultdict(Counter))
     overall_total_reaction_count = scan_data.get("overall_total_reaction_count", 0)
     overall_filtered_reaction_count = scan_data.get("overall_total_filtered_reaction_count", 0)
+    user_emoji_received_counts = scan_data.get("user_emoji_received_counts", defaultdict(Counter)) # <<< LẤY DỮ LIỆU MỚI
 
 
     # === KHỐI TẠO VÀ GỬI EMBEDS (THỨ TỰ MỚI) ===
@@ -195,7 +196,11 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     # 12. Nhận Reactions
     await _try_create_and_add_embed(
         embeds_user.create_top_reaction_received_users_embed, all_public_embeds, scan_errors,
-        user_reaction_received_counts, guild=server, bot=bot
+        user_reaction_received_counts, # Counter tổng reaction nhận
+        guild=server,
+        bot=bot,
+        user_emoji_received_counts=user_emoji_received_counts, # <<< TRUYỀN DỮ LIỆU MỚI
+        scan_data=scan_data # <<< TRUYỀN scan_data để lấy emoji cache
     )
 
     # 13. Top User Dùng Custom Emoji Server

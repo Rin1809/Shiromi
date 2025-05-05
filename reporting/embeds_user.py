@@ -9,6 +9,7 @@ import time
 from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
 from collections import Counter, defaultdict
+import unicodedata # <<< THÊM IMPORT NÀY Ở ĐẦU FILE
 
 # Relative import
 # Sử dụng import tuyệt đối
@@ -570,17 +571,20 @@ async def create_top_repliers_embed(
 async def create_top_reaction_received_users_embed(
     counts: collections.Counter,
     guild: discord.Guild,
-    bot: Union[discord.Client, commands.Bot]
+    bot: Union[discord.Client, commands.Bot],
+    # <<< THÊM THAM SỐ MỚI >>>
+    user_emoji_received_counts: Optional[defaultdict] = None,
+    scan_data: Optional[Dict[str, Any]] = None # Cần scan_data để lấy emoji cache
 ) -> Optional[discord.Embed]:
+    """Tạo embed BXH user nhận reaction nhiều nhất (hiển thị top emoji nhận).""" # Cập nhật docstring
     e = lambda name: utils.get_emoji(name, bot)
-    # Bỏ '#' ở đầu title
     title = f"{e('reaction')} BXH User Nhận Reactions Nhiều Nhất"
     limit = TOP_REACTION_RECEIVED_USERS_LIMIT
     filter_admins = False # Không lọc admin
     color = discord.Color.gold()
     item_name_singular="reaction"
     item_name_plural="reactions"
-    footer_note="Emoji được thả trên tin nhắn."
+    footer_note="Chỉ tính reaction đã lọc (custom server + exceptions)." # Cập nhật footer
 
     if not counts: return None
 
@@ -594,6 +598,10 @@ async def create_top_reaction_received_users_embed(
     users_to_display = filtered_sorted_users[:limit]
     user_ids_to_fetch = [uid for uid, count in users_to_display if isinstance(uid, int)]
     user_cache = await utils._fetch_user_dict(guild, user_ids_to_fetch, bot)
+    # <<< LẤY EMOJI CACHE TỪ SCAN_DATA >>>
+    emoji_cache: Dict[int, discord.Emoji] = {}
+    if scan_data:
+        emoji_cache = scan_data.get("server_emojis_cache", {})
 
     title_emoji = e('award') if e('award') != '❓' else '🏆'
     embed = discord.Embed(title=f"{title_emoji} {title}", color=color)
@@ -601,8 +609,28 @@ async def create_top_reaction_received_users_embed(
     description_lines = [desc_prefix, ""]
 
     for rank, (user_id, count) in enumerate(users_to_display, 1):
+        # <<< TÌM EMOJI NHẬN NHIỀU NHẤT >>>
+        secondary_info = None
+        if user_emoji_received_counts:
+            user_specific_counts = user_emoji_received_counts.get(user_id, Counter())
+            if user_specific_counts:
+                try:
+                    most_received_key, top_count = user_specific_counts.most_common(1)[0]
+                    if isinstance(most_received_key, int):
+                        emoji_obj = emoji_cache.get(most_received_key) or bot.get_emoji(most_received_key)
+                        if emoji_obj: secondary_info = f"• Top Nhận: {str(emoji_obj)} ({top_count:,})"
+                        else: secondary_info = f"• Top Nhận ID: `{most_received_key}` ({top_count:,})"
+                    elif isinstance(most_received_key, str): # Unicode
+                         try: unicodedata.name(most_received_key); secondary_info = f"• Top Nhận: {most_received_key} ({top_count:,})"
+                         except (TypeError, ValueError): secondary_info = f"• Top Nhận: `{most_received_key}` ({top_count:,})"
+                except (ValueError, IndexError): pass
+                except Exception as e_find: log.warning(f"Lỗi tìm top emoji nhận cho user {user_id}: {e_find}")
+        # <<< KẾT THÚC TÌM EMOJI >>>
+
         lines = await _format_user_tree_line(
-            rank, user_id, count, item_name_singular, item_name_plural, guild, user_cache
+            rank, user_id, count, item_name_singular, item_name_plural,
+            guild, user_cache,
+            secondary_info=secondary_info # Truyền thông tin emoji tìm được
         )
         description_lines.extend(lines)
 

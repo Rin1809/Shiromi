@@ -228,6 +228,30 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
                 user_react_received_counter[author_id] += msg_react_filtered_count
                 user_data['reaction_received_count'] = user_react_received_counter[author_id]
 
+                # <<< THÊM LOGIC ĐẾM EMOJI NHẬN ĐƯỢC CHO USER >>>
+                if msg_react_filtered_count > 0: # Chỉ đếm nếu có reaction đã lọc
+                    user_emoji_received_counter_for_author = scan_data.setdefault("user_emoji_received_counts", defaultdict(Counter))[author_id]
+                    # Cần lặp lại qua các reaction đã lọc để lấy emoji_key
+                    for inner_reaction in message.reactions:
+                         inner_emoji = inner_reaction.emoji
+                         inner_emoji_key: Optional[Union[int, str]] = None
+                         is_inner_custom = False
+                         is_inner_allowed_unicode = False
+
+                         if isinstance(inner_emoji, discord.Emoji):
+                              if inner_emoji.id in server_emojis_cache:
+                                   is_inner_custom = True
+                                   inner_emoji_key = inner_emoji.id
+                         elif isinstance(inner_emoji, str):
+                              if inner_emoji in config.REACTION_UNICODE_EXCEPTIONS:
+                                   is_inner_allowed_unicode = True
+                                   inner_emoji_key = inner_emoji
+
+                         # Nếu là reaction được lọc và có key hợp lệ
+                         if (is_inner_custom or is_inner_allowed_unicode) and inner_emoji_key is not None:
+                              user_emoji_received_counter_for_author[inner_emoji_key] += inner_reaction.count
+                # <<< KẾT THÚC THÊM LOGIC >>>
+
         except AttributeError as attr_err:
             log_emoji_info = "N/A"
             if 'reaction' in locals() and hasattr(reaction, 'emoji'):
