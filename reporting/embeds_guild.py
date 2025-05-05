@@ -77,6 +77,7 @@ async def create_summary_embed(
     )
 
     # --- Tạo Embed ---
+    # Bỏ '#' ở đầu title
     summary_embed = discord.Embed(
         title=f"{e('star')} Tổng Quan Server: {server.name} {e('star')}",
         description=scan_summary,
@@ -179,18 +180,21 @@ async def create_channel_activity_embed(
         log.debug("Không có dữ liệu hoạt động kênh text/voice để tạo embed.")
         return None
 
+    # Bỏ '#' ở đầu title
     embed = discord.Embed(
         title=f"💬 Hoạt động Kênh",
         color=discord.Color.green()
     )
 
+    # Bỏ '#' ở đầu field name
     embed.add_field(
-        name="🔥 Top Kênh Text \"Nóng\"",
+        name=f"🔥 Top Kênh Text \"Nóng\"",
         value="\n".join(top_text_lines) if top_text_lines else "*Không có dữ liệu kênh text.*",
         inline=False
     )
+    # Bỏ '#' ở đầu field name
     embed.add_field(
-        name="🎤 Top Kênh Voice \"Nóng\" (Chat Text)",
+        name=f"🎤 Top Kênh Voice \"Nóng\" (Chat Text)",
         value="\n".join(top_voice_lines), # Sẽ hiển thị "Không tìm thấy..." nếu cần
         inline=False
     )
@@ -214,9 +218,10 @@ async def create_golden_hour_embed(
     local_offset_hours = utils.get_local_timezone_offset()
     timezone_str = f"UTC{local_offset_hours:+d}" if local_offset_hours is not None else "UTC"
 
+    # Bỏ '#' ở đầu title
     embed = discord.Embed(
         title=f"☀️🌙 \"Giờ Vàng\" của Server ({timezone_str})",
-        description="*Khung giờ server và các kênh/luồng có nhiều tin nhắn nhất.*",
+        description="*Khung giờ server và các kênh/chủ đề có nhiều tin nhắn nhất.*",
         color=discord.Color.gold()
     )
 
@@ -254,6 +259,7 @@ async def create_golden_hour_embed(
         if rank >= 3:
             break
 
+    # Bỏ '## ' ở đầu field name
     embed.add_field(
         name="🏆 Khung Giờ Vàng Toàn Server",
         value="\n".join(server_golden_lines) if server_golden_lines else "Không có dữ liệu.",
@@ -324,6 +330,7 @@ async def create_golden_hour_embed(
         location_golden_lines.append(f"{loc_type_emoji} {loc_mention}: **{time_str}** ({count:,} tin)")
         locations_shown += 1
 
+    # Bỏ '## ' ở đầu field name
     embed.add_field(
         name=f"🏅 Giờ Vàng Của Top {GOLDEN_HOUR_TOP_CHANNELS} Kênh/Luồng",
         value="\n".join(location_golden_lines) if location_golden_lines else "Không có dữ liệu.",

@@ -58,6 +58,7 @@ async def create_personal_activity_embed(
         f"{e('sticker')} Stickers đã gửi: {sticker_count:,}",
         f"📎 Files khác: {other_file_count:,}" # Thêm dòng file khác
     ]
+    # Bỏ '#' ở đầu field name
     embed.add_field(name="📜 Tin Nhắn & Nội Dung", value="\n".join(content_lines), inline=False)
 
     # --- Field 2: Tương tác ---
@@ -78,6 +79,7 @@ async def create_personal_activity_embed(
         f"{e('mention')} Mentions nhận: {mention_received:,}",
         *react_lines # Chèn các dòng reaction nếu có
     ]
+    # Bỏ '#' ở đầu field name
     embed.add_field(name="💬 Tương Tác", value="\n".join(interaction_lines).strip(), inline=False)
 
     # --- Field 3: Thời gian hoạt động ---
@@ -91,6 +93,7 @@ async def create_personal_activity_embed(
         f"{e('calendar')} HĐ cuối cùng: {utils.format_discord_time(last_seen, 'R') if last_seen else 'N/A'}",
         f"{e('clock')} Khoảng TG hoạt động: **{activity_span_str}**"
     ]
+    # Bỏ '#' ở đầu field name
     embed.add_field(name="⏳ Thời Gian Hoạt Động", value="\n".join(time_lines), inline=False)
 
     # --- Field 4: Phạm vi hoạt động (Top 3 Kênh) ---
@@ -118,6 +121,7 @@ async def create_personal_activity_embed(
     else:
         scope_lines.append("📍 Top Kênh/Luồng Hoạt Động: *Chưa có dữ liệu*")
 
+    # Bỏ '#' ở đầu field name
     embed.add_field(name="🎯 Phạm Vi Hoạt Động", value="\n".join(scope_lines), inline=False)
 
     # --- Field 5: Top Items Cá Nhân (Emoji & Sticker) ---
@@ -163,6 +167,7 @@ async def create_personal_activity_embed(
              top_items_lines.append(f"{e('sticker')} **Top Stickers:** " + ", ".join(sticker_strs))
 
     if top_items_lines:
+        # Bỏ '#' ở đầu field name
         embed.add_field(name=f"⭐ Top Items Cá Nhân", value="\n".join(top_items_lines), inline=False)
 
     # --- Field 6: Giờ Vàng Cá Nhân ---
@@ -193,11 +198,14 @@ async def create_personal_activity_embed(
                  local_end_dt = local_start_dt + datetime.timedelta(hours=PERSONAL_GOLDEN_HOUR_INTERVAL)
                  time_str = f"{local_start_dt.strftime('%H:%M')} - {local_end_dt.strftime('%H:%M')}"
                  golden_hour_line = f"Khung giờ sôi nổi nhất ({timezone_str}): **{time_str}** ({max_count:,} tin)"
+                 # Bỏ '#' ở đầu field name
                  embed.add_field(name="☀️🌙 Giờ Vàng Cá Nhân", value=golden_hour_line, inline=False)
              except Exception as gh_err:
                  log.warning(f"Lỗi tính giờ vàng cá nhân cho user {user_id}: {gh_err}")
+                 # Bỏ '#' ở đầu field name
                  embed.add_field(name="☀️🌙 Giờ Vàng Cá Nhân", value="*Không thể xác định*", inline=False)
         else:
+             # Bỏ '#' ở đầu field name
              embed.add_field(name="☀️🌙 Giờ Vàng Cá Nhân", value="*Chưa có dữ liệu*", inline=False)
 
     scan_end_time = scan_data.get("scan_end_time", datetime.datetime.now(datetime.timezone.utc))
@@ -216,6 +224,7 @@ async def create_achievements_embed(
     user_id = member.id
     has_achievements = False # Cờ để kiểm tra xem có thành tích nào không
 
+    # Bỏ '#' ở đầu title
     embed = discord.Embed(
         title=f"{e('award')} Thành Tích & Vị Trí Của Bạn",
         description="*So sánh hoạt động của bạn với toàn server. Chỉ hiển thị nếu bạn lọt vào top.*",
@@ -241,6 +250,7 @@ async def create_achievements_embed(
     add_rank_line(activity_ranks, "Hay Nhắc Tên", "mention_given")
     add_rank_line(activity_ranks, '"Người Đa Năng" (Nhiều kênh)', "distinct_channels")
     if activity_ranks:
+        # Bỏ '#' ở đầu field name
         embed.add_field(name=f"{e('stats')} BXH Hoạt Động & Tương Tác", value="\n".join(activity_ranks), inline=False)
 
     # === Field 2: BXH Sáng Tạo Nội Dung ===
@@ -251,6 +261,7 @@ async def create_achievements_embed(
     add_rank_line(content_ranks, "Gửi Ảnh", "images_sent")
     add_rank_line(content_ranks, "Tạo Thread", "threads_created")
     if content_ranks:
+        # Bỏ '#' ở đầu field name
         embed.add_field(name=f"{e('image')} BXH Sáng Tạo Nội Dung", value="\n".join(content_ranks), inline=False)
 
     # === Field 3: Danh Hiệu Đặc Biệt ===
@@ -269,6 +280,7 @@ async def create_achievements_embed(
             special_role_lines.append(f'- Đã nhận {role_mention}: **{grant_count}** lần {rank_str}'.strip())
             has_achievements = True
     if special_role_lines:
+        # Bỏ '#' ở đầu field name
         embed.add_field(name=f"{e('crown')} Danh Hiệu Đặc Biệt", value="\n".join(special_role_lines), inline=False)
 
 
@@ -279,6 +291,7 @@ async def create_achievements_embed(
     if member.premium_since:
         add_rank_line(time_ranks, "Booster Bền Bỉ", "booster_duration")
     if time_ranks:
+        # Bỏ '#' ở đầu field name
         embed.add_field(name=f"{e('calendar')} BXH Thời Gian & Tham Gia", value="\n".join(time_ranks), inline=False)
 
 
