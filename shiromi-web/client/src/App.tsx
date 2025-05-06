@@ -5,7 +5,7 @@ import SearchBar from './components/SearchBar';
 import UserInfoDisplay from './components/UserInfoDisplay';
 import './components/styles/App.css';
 
-// Interface UserScanResult (Giữ nguyên)
+// Interface UserScanResult
 interface UserScanResult {
   user_id: string;
   display_name_at_scan: string;
@@ -58,13 +58,13 @@ function ScanPage() {
     setSearchTerm('');
     setScanId(null);
     
-    let stage1Timer: number | null = null; // Sửa thành number
-    let stage2Timer: number | null = null; // Sửa thành number
-    let fade1Timer: number | null = null; // Sửa thành number
-    let fade2Timer: number | null = null; // Sửa thành number
+    let stage1Timer: number | null = null; 
+    let stage2Timer: number | null = null; 
+    let fade1Timer: number | null = null;
+    let fade2Timer: number | null = null; 
 
     const catDisplayTime = 1800;
-    const serverNameDisplayTime = 2000; // Có thể cần tăng thêm chút nếu animation phức tạp hơn
+    const serverNameDisplayTime = 2000;
     const fadeDuration = 500;
 
     stage1Timer = setTimeout(() => { setIsFadingOut(true); }, catDisplayTime);
@@ -186,7 +186,7 @@ function ScanPage() {
           {isLoading && <p className="loading">Đang tìm kiếm...</p>}
           {error && <p className="error">{error}</p>}
           {scanId && searchResults.length > 0 && (
-            <p className="scan-info">Hiển thị kết quả từ lần quét ID: {scanId}</p>
+            <p className="scan-info">ID trích từ Database là: {scanId}</p>
           )}
           <div className="results-container">
             {searchResults.map((user, index) => (
@@ -232,7 +232,7 @@ function App() {
         />
       </Routes>
       <footer>
-          Author: Rin 🥰
+           ᓚᘏᗢ Rin 
       </footer>
     </div>
   );

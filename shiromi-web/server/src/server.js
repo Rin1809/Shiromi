@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const apiRoutes = require('./api');
-require('dotenv').config(); // Tải .env cho server
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3001; // Railway cung cấp PORT

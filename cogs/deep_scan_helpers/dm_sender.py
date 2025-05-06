@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from collections import Counter, defaultdict
 import collections
 
-import config # Import config đã cập nhật
+import config 
 import utils
 from reporting import embeds_dm
 

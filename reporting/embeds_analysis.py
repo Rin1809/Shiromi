@@ -7,14 +7,12 @@ import collections
 import asyncio
 from typing import List, Dict, Any, Optional, Union, Set, Tuple
 import unicodedata
-from collections import Counter, defaultdict, OrderedDict # Thêm OrderedDict
+from collections import Counter, defaultdict, OrderedDict
 
 log = logging.getLogger(__name__)
 
-import utils # Chỉ import utils
+import utils
 import config
-# Bỏ import này vì hàm _format_user_tree_line đã chuyển sang utils
-# from .embeds_user import _format_user_tree_line
 
 # --- Constants ---
 KEYWORD_RANKING_LIMIT = 10

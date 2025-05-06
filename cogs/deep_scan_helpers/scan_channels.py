@@ -7,7 +7,7 @@ import time
 import datetime
 import re
 from typing import Dict, Any, List, Union, Optional, Set, Tuple
-from collections import Counter, defaultdict # Đảm bảo defaultdict được import
+from collections import Counter, defaultdict
 
 import config
 import utils

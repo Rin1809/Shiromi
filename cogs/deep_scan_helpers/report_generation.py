@@ -10,8 +10,6 @@ import datetime
 import config
 import utils
 import database
-
-# Import các module tạo embeds
 from reporting import embeds_guild, embeds_user, embeds_items, embeds_analysis, embeds_dm
 
 log = logging.getLogger(__name__)

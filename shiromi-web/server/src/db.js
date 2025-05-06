@@ -1,6 +1,6 @@
 // --- START OF FILE website/server/src/db.js ---
 const { Pool } = require('pg');
-require('dotenv').config(); // Tải biến môi trường từ .env (nếu có)
+require('dotenv').config();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

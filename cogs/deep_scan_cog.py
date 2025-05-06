@@ -8,19 +8,18 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union, Counter as TypingCounter, DefaultDict as TypingDefaultDict, Tuple
 from collections import Counter, defaultdict
 
-# Import các module cần thiết
 import config
 import utils
 import database
 import discord_logging
 
-# Import các hàm helper từ thư mục con
+
 from .deep_scan_helpers import (
     initialize_scan, scan_all_channels_and_threads, process_additional_data,
     generate_and_send_reports, generate_export_files, finalize_scan,
     send_personalized_dm_reports
 )
-# Thêm import cho embeds_dm để lấy dữ liệu khi lưu
+
 from reporting import embeds_dm
 
 log = logging.getLogger(__name__)
@@ -47,11 +46,13 @@ async def save_aggregated_results_to_db(scan_data: Dict[str, Any], ranking_data:
 
         member = member_cache.get(user_id)
         display_name = member.display_name if member else f"User {user_id}"
+        avatar_url = str(member.display_avatar.url) if member and member.display_avatar else None # LẤY AVATAR URL
 
         # Thu thập dữ liệu cơ bản từ user_activity
         user_result = {
             "user_id": user_id,
             "display_name_at_scan": display_name[:100], # Giới hạn độ dài
+            "avatar_url_at_scan": avatar_url, # LƯU AVATAR URL
             "is_bot": user_act_data.get('is_bot', False),
             "message_count": user_act_data.get('message_count', 0),
             "link_count": user_act_data.get('link_count', 0),
@@ -268,8 +269,17 @@ class ServerDeepScan(commands.Cog):
             final_error = None
             if scan_data["scan_errors"]:
                 # Có thể đặt là 'completed_with_errors' nếu muốn phân biệt
-                final_status = 'completed'
-                final_error = "; ".join(scan_data["scan_errors"][:3]) # Lấy vài lỗi đầu
+                final_status = 'completed' # Giữ là completed, lỗi sẽ được ghi lại
+                final_error_messages = []
+                for err_item in scan_data["scan_errors"]:
+                    if isinstance(err_item, str):
+                        final_error_messages.append(err_item[:250]) # Giới hạn độ dài từng lỗi
+                    elif isinstance(err_item, Exception):
+                        final_error_messages.append(f"{type(err_item).__name__}: {str(err_item)[:200]}")
+                final_error = "; ".join(final_error_messages[:5]) # Lấy tối đa 5 lỗi đầu, giới hạn tổng độ dài
+                if len(final_error) > 1000: final_error = final_error[:1000] + "..."
+
+
             await database.update_scan_status(
                 scan_id,
                 status=final_status,
@@ -277,22 +287,23 @@ class ServerDeepScan(commands.Cog):
                 website_ready=True, # Đảm bảo cờ này vẫn là True
                 error=final_error
             )
+            log.info(f"Scan {scan_id} được đánh dấu là '{final_status}' trong DB." + (f" Lỗi: {final_error}" if final_error else ""))
             # --- KẾT THÚC ĐÁNH DẤU ---
 
         except commands.BotMissingPermissions as bmp_error:
              log.error(f"Quét dừng do thiếu quyền bot: {bmp_error.missing_permissions}")
-             error_msg = f"Bot Missing Permissions: {bmp_error.missing_permissions}"
-             if scan_id: await database.update_scan_status(scan_id, status='failed', error=error_msg, end_time=discord.utils.utcnow())
+             error_msg = f"Bot Missing Permissions: {', '.join(bmp_error.missing_permissions)}"
+             if scan_id: await database.update_scan_status(scan_id, status='failed', error=error_msg[:1000], end_time=discord.utils.utcnow())
              if not scan_data.get("scan_started", False) and ctx.command: ctx.command.reset_cooldown(ctx)
         except ConnectionError as conn_err:
              log.error(f"Quét dừng do lỗi kết nối: {conn_err}")
-             error_msg = f"Connection Error: {conn_err}"
+             error_msg = f"Connection Error: {str(conn_err)[:250]}"
              if scan_id: await database.update_scan_status(scan_id, status='failed', error=error_msg, end_time=discord.utils.utcnow())
              if not scan_data.get("scan_started", False) and ctx.command: ctx.command.reset_cooldown(ctx)
         except Exception as ex:
             log.critical(f"{e('error')} LỖI KHÔNG MONG MUỐN trong quá trình quét sâu:", exc_info=True)
-            error_msg = f"Unexpected Error: {type(ex).__name__} - {ex}"
-            scan_data["scan_errors"].append(f"Lỗi nghiêm trọng không xác định: {type(ex).__name__} - {ex}")
+            error_msg = f"Unexpected Error: {type(ex).__name__} - {str(ex)[:200]}"
+            scan_data["scan_errors"].append(f"Lỗi nghiêm trọng không xác định: {type(ex).__name__} - {str(ex)[:200]}")
             if scan_id: await database.update_scan_status(scan_id, status='failed', error=error_msg, end_time=discord.utils.utcnow())
             try: await ctx.send(f"{e('error')} Đã xảy ra lỗi nghiêm trọng không mong muốn trong quá trình quét. Báo cáo có thể không đầy đủ.")
             except Exception: pass
@@ -300,23 +311,52 @@ class ServerDeepScan(commands.Cog):
         finally:
             # Giai đoạn 7: Hoàn tất và Dọn dẹp (finalize_scan đã chứa logic gửi link)
             await finalize_scan(scan_data) # finalize_scan sẽ dùng scan_data['scan_id'] và config.WEBSITE_BASE_URL
-            discord_logging.set_log_target_thread(None)
+            discord_logging.set_log_target_thread(None) # Đặt lại target log sau khi lệnh hoàn tất
             log.info(f"[dim]Hoàn tất dọn dẹp sau lệnh {ctx.command.name if ctx.command else 'unknown'}.[/dim]")
 
-    # --- Lệnh !romi (test) và !shiromirun (normal) giữ nguyên ---
-    # Chỉ cần đảm bảo chúng gọi _perform_deep_scan
-    @commands.command(name='romi', aliases=['sds', 'serverdeepscan'], help='...', brief='(OWNER ONLY - ADMIN TEST) Quét sâu, gửi DM test cho admin.')
+    # --- Lệnh !romi (test) và !shiromirun (normal) ---
+    @commands.command(
+        name='romi',
+        aliases=['sds', 'serverdeepscan'],
+        help=(
+            "Thực hiện quét sâu server (CHẾ ĐỘ TEST).\n"
+            "Các báo cáo DM sẽ được gửi đến ADMIN_USER_ID trong file .env.\n"
+            "Usage: `Shiromi [export_csv=True/False] [export_json=True/False] [keywords=từ khóa1,từ khóa2]`\n"
+            "Mặc định không export file và không tìm keywords."
+        ),
+        brief='(OWNER ONLY - ADMIN TEST) Quét sâu, gửi DM test cho admin.'
+    )
     @commands.is_owner()
-    @commands.cooldown(1, 7200, commands.BucketType.guild)
+    @commands.cooldown(1, 7200, commands.BucketType.guild) # Cooldown 2 giờ/server
     @commands.guild_only()
-    async def server_deep_scan_test(self, ctx: commands.Context, *, export_csv: bool = False, export_json: bool = False, keywords: Optional[str] = None):
+    async def server_deep_scan_test(self, ctx: commands.Context, export_csv: bool = False, export_json: bool = False, *, keywords: Optional[str] = None):
+        """
+        OWNER ONLY.
+        Thực hiện quét sâu dữ liệu của server Discord này.
+        CHẾ ĐỘ TEST: Báo cáo DM chi tiết sẽ được gửi đến ADMIN_USER_ID.
+        """
         await self._perform_deep_scan(ctx=ctx, export_csv=export_csv, export_json=export_json, admin_dm_test=True, keywords=keywords)
 
-    @commands.command(name='shiromirun', help='...', brief='(OWNER ONLY - NORMAL RUN) Quét sâu, gửi DM cho role cấu hình.')
+
+    @commands.command(
+        name='shiromirun',
+        help=(
+            "Thực hiện quét sâu server (CHẾ ĐỘ BÌNH THƯỜNG).\n"
+            "Các báo cáo DM sẽ được gửi đến những người dùng có role được cấu hình trong DM_REPORT_RECIPIENT_ROLE_ID.\n"
+            "Usage: `Shiromirun [export_csv=True/False] [export_json=True/False] [keywords=từ khóa1,từ khóa2]`\n"
+            "Mặc định không export file và không tìm keywords."
+        ),
+        brief='(OWNER ONLY - NORMAL RUN) Quét sâu, gửi DM cho role cấu hình.'
+    )
     @commands.is_owner()
-    @commands.cooldown(1, 7200, commands.BucketType.guild)
+    @commands.cooldown(1, 7200, commands.BucketType.guild) # Cooldown 2 giờ/server
     @commands.guild_only()
-    async def server_deep_scan_normal(self, ctx: commands.Context, *, export_csv: bool = False, export_json: bool = False, keywords: Optional[str] = None):
+    async def server_deep_scan_normal(self, ctx: commands.Context, export_csv: bool = False, export_json: bool = False, *, keywords: Optional[str] = None):
+        """
+        OWNER ONLY.
+        Thực hiện quét sâu dữ liệu của server Discord này.
+        CHẾ ĐỘ BÌNH THƯỜNG: Báo cáo DM chi tiết sẽ được gửi đến những người dùng có role được cấu hình.
+        """
         await self._perform_deep_scan(ctx=ctx, export_csv=export_csv, export_json=export_json, admin_dm_test=False, keywords=keywords)
 
 

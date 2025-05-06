@@ -93,16 +93,14 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
 
     # --- Kiểm tra quyền Bot ---
     if not await _check_bot_permissions(scan_data):
-        # Lỗi thiếu quyền cơ bản đã được xử lý và báo cáo trong _check_bot_permissions
-        return False # Dừng nếu thiếu quyền cơ bản
+        return False 
 
     # --- Lấy dữ liệu cache ban đầu (members, roles, channels, EMOJIS, STICKERS) ---
     if not await _fetch_initial_cache(scan_data):
-        # Lỗi fetch cache đã được xử lý và báo cáo trong _fetch_initial_cache
-        return False # Dừng nếu không fetch được cache ban đầu
+        return False 
 
     # --- Lọc kênh và kiểm tra quyền truy cập kênh ---
-    await _filter_accessible_channels(scan_data)
+    await _filter_accessible_channels(scan_data) # Sửa đổi ở đây
     total_accessible_channels = len(scan_data["accessible_channels"])
     log.info(f"Tìm thấy [green]{total_accessible_channels}[/] kênh có thể quét, [yellow]{scan_data['skipped_channels_count']}[/] bị bỏ qua.")
 
@@ -112,17 +110,15 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
 
     # --- Xử lý trường hợp không có kênh nào để quét ---
     if total_accessible_channels == 0:
-        final_message = f"{e('error')} Không có kênh text/voice nào để quét (kiểm tra quyền của bot)."
+        final_message = f"{e('error')} Không có kênh text/voice nào để quét (kiểm tra quyền của bot hoặc cấu hình loại trừ category)."
         log.error(final_message)
         await _update_initial_status(scan_data, content=final_message, embed=None)
         if scan_data["log_thread"]:
             try: await scan_data["log_thread"].send(final_message)
             except Exception: pass
-        # Không raise lỗi ở đây, để cog xử lý và reset cooldown
-        return False # Báo hiệu dừng quét
+        return False 
 
-    # Đánh dấu giai đoạn khởi tạo thành công
-    scan_data["scan_started"] = True # Đánh dấu quét đã bắt đầu (quan trọng cho việc reset cooldown)
+    scan_data["scan_started"] = True 
     log.info("Hoàn thành giai đoạn khởi tạo và kiểm tra.")
     return True
 
@@ -139,12 +135,10 @@ async def _update_initial_status(scan_data: Dict[str, Any], content: Optional[st
         await initial_msg.edit(content=content, embed=embed)
     except (discord.NotFound, discord.HTTPException) as edit_err:
         log.warning(f"Không thể sửa/tìm thấy tin nhắn trạng thái ban đầu: {edit_err}")
-        # Thử gửi lại nếu bị xóa hoặc lỗi
         try:
             scan_data["initial_status_msg"] = await ctx.send(content=content, embed=embed)
         except discord.HTTPException as send_err:
             log.error(f"Không thể gửi lại tin nhắn trạng thái ban đầu: {send_err}")
-            # Đây là lỗi nghiêm trọng, có thể ảnh hưởng đến các cập nhật sau
     except Exception as e:
          log.error(f"Lỗi không xác định khi cập nhật tin nhắn trạng thái: {e}", exc_info=True)
 
@@ -156,12 +150,8 @@ async def _check_bot_permissions(scan_data: Dict[str, Any]) -> bool:
     scan_errors: List[str] = scan_data["scan_errors"]
     e = lambda name: utils.get_emoji(name, bot)
 
-    # Quyền cơ bản tuyệt đối cần thiết
     required_perms_base = [
-        "view_channel",
-        "read_message_history",
-        "embed_links", # Để gửi báo cáo
-        "attach_files" # Để gửi file export
+        "view_channel", "read_message_history", "embed_links", "attach_files"
     ]
     bot_perms = server.me.guild_permissions
     missing_perms: List[str] = [p for p in required_perms_base if not getattr(bot_perms, p, False)]
@@ -174,23 +164,17 @@ async def _check_bot_permissions(scan_data: Dict[str, Any]) -> bool:
         if scan_data["log_thread"]:
             try: await scan_data["log_thread"].send(f"{e('error')} **Dừng quét:** Bot thiếu quyền `{perms_str}`.")
             except Exception: pass
-        # Raise lỗi để cog bắt và reset cooldown
         raise commands.BotMissingPermissions(missing_perms)
-        # return False # Chỉ cần raise là đủ
 
     log.info(f"{e('success')} Quyền cơ bản OK.")
 
-    # Kiểm tra quyền cho các tính năng tùy chọn
     scan_data["can_scan_invites"] = bot_perms.manage_guild
     scan_data["can_scan_webhooks"] = bot_perms.manage_webhooks
     scan_data["can_scan_integrations"] = bot_perms.manage_guild
     scan_data["can_scan_audit_log"] = bot_perms.view_audit_log
-    # Quyền quét reactions phụ thuộc vào cấu hình và quyền đọc lịch sử
     scan_data["can_scan_reactions"] = config.ENABLE_REACTION_SCAN and bot_perms.read_message_history
-    # Quyền xem thread lưu trữ (cần 1 trong 2)
     scan_data["can_scan_archived_threads"] = bot_perms.read_message_history or bot_perms.manage_threads
 
-    # Log cảnh báo nếu thiếu quyền cho tính năng tùy chọn
     if not scan_data["can_scan_invites"]:
         scan_errors.append("Thiếu quyền 'Manage Server', bỏ qua invites.")
         log.warning(f"{e('warning')} Bỏ qua invites (thiếu Manage Server)")
@@ -222,35 +206,26 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
     log.info(f"{e('loading')} Đang fetch dữ liệu cache ban đầu...")
 
     try:
-        current_members_list = [] # Khởi tạo list rỗng
-        # Cố gắng chunk hoặc fetch members để đảm bảo cache cập nhật
+        current_members_list = [] 
         if bot.intents.members:
             log.debug("Intents Members đang bật, đang fetch members...")
             try:
-                # <<< FIX: Sử dụng async for để fetch members >>>
                 current_members_list = [member async for member in server.fetch_members(limit=None)]
                 log.debug(f"Fetch {len(current_members_list)} members hoàn tất.")
             except discord.Forbidden:
                  log.error(f"{e('error')} Lỗi quyền khi fetch members. Bot có thiếu Members Intent không?")
-                 raise # Re-raise lỗi để dừng quét
+                 raise 
             except discord.HTTPException as fetch_err:
                  log.error(f"{e('error')} Lỗi HTTP khi fetch members: {fetch_err.status} {fetch_err.text}")
-                 raise # Re-raise lỗi
+                 raise 
         else:
             log.warning("Members Intent đang tắt, dữ liệu member có thể không đầy đủ. Sử dụng cache hiện tại.")
-            current_members_list = list(server.members) # Lấy từ cache nếu không fetch được
+            current_members_list = list(server.members) 
 
-        # Lưu danh sách member vào scan_data
         scan_data["current_members_list"] = current_members_list
         log.info(f"Lấy được {len(current_members_list)} thành viên.")
-
-        # Đếm trạng thái member ban đầu
         scan_data["initial_member_status_counts"] = Counter(str(m.status) for m in current_members_list)
-
-        # Đếm loại kênh
         scan_data["channel_counts"] = Counter(c.type for c in server.channels)
-
-        # Lấy danh sách roles (không tính @everyone), sắp xếp theo vị trí
         scan_data["all_roles_list"] = sorted(
             [r for r in server.roles if not r.is_default()],
             key=lambda r: r.position,
@@ -258,7 +233,6 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
         )
         log.info(f"Tổng cộng {len(scan_data['all_roles_list'])} roles (không tính @everyone).")
 
-        # <<< FIX: Fetch và cache server emojis và stickers >>>
         try:
             server_emojis = await server.fetch_emojis()
             scan_data["server_emojis_cache"] = {emoji.id: emoji for emoji in server_emojis}
@@ -286,8 +260,6 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
         except Exception as e_sticker:
             log.error(f"{e('error')} Lỗi không xác định fetch stickers: {e_sticker}. Bỏ qua cache sticker.")
             scan_data["server_sticker_ids_cache"] = set()
-        # <<< END FIX >>>
-
         return True
 
     except discord.Forbidden:
@@ -297,7 +269,6 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
          if scan_data["log_thread"]:
               try: await scan_data["log_thread"].send(f"{e('error')} **Dừng quét:** Lỗi fetch dữ liệu cache (quyền).")
               except Exception: pass
-         # Không raise ở đây, trả về False để cog xử lý
          return False
     except Exception as cache_err:
         log.error(f"{e('error')} Lỗi fetch dữ liệu cache ban đầu: {cache_err}", exc_info=True)
@@ -306,28 +277,45 @@ async def _fetch_initial_cache(scan_data: Dict[str, Any]) -> bool:
         if scan_data["log_thread"]:
              try: await scan_data["log_thread"].send(f"{e('error')} **Dừng quét:** Lỗi fetch dữ liệu cache.")
              except Exception: pass
-        # Raise lỗi để cog bắt và reset cooldown
         raise RuntimeError(f"Failed to fetch initial guild data: {cache_err}") from cache_err
-        # return False
 
 
 async def _filter_accessible_channels(scan_data: Dict[str, Any]):
-    """Lọc các kênh Text/Voice mà bot có thể đọc lịch sử."""
+    """Lọc các kênh Text/Voice mà bot có thể đọc lịch sử, bỏ qua category đã cấu hình."""
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     scan_errors: List[str] = scan_data["scan_errors"]
-    channel_details: List[Dict[str, Any]] = scan_data["channel_details"]
+    channel_details: List[Dict[str, Any]] = scan_data.setdefault("channel_details", []) # Đảm bảo list tồn tại
     accessible_channels: List[Union[discord.TextChannel, discord.VoiceChannel]] = []
     skipped_channels_count = 0
+    
+    # Lấy danh sách ID category cần loại trừ từ config
+    excluded_category_ids: Set[int] = config.EXCLUDED_CATEGORY_IDS
 
     log.info(f"{utils.get_emoji('info', bot)} Đang lọc kênh text & voice...")
-    # Chỉ lấy TextChannel và VoiceChannel từ cache của server
     channels_to_scan = server.text_channels + server.voice_channels
 
     for channel in channels_to_scan:
         channel_type_emoji = utils.get_channel_type_emoji(channel, bot)
         try:
-            # Kiểm tra quyền cụ thể trên kênh này
+            # --- KIỂM TRA LOẠI TRỪ CATEGORY ---
+            if channel.category_id and channel.category_id in excluded_category_ids:
+                skipped_channels_count += 1
+                category_name = channel.category.name if channel.category else f"ID {channel.category_id}"
+                reason = f"Thuộc category bị loại trừ: '{utils.escape_markdown(category_name)}'"
+                scan_errors.append(f"Kênh {channel_type_emoji} #{channel.name}: Bỏ qua ({reason}).")
+                log.warning(f"Bỏ qua kênh {channel_type_emoji} [yellow]#{channel.name}[/]: {reason}")
+                channel_details.append({
+                    "type": str(channel.type), "name": channel.name, "id": channel.id,
+                    "created_at": channel.created_at,
+                    "category": getattr(channel.category, 'name', "N/A"),
+                    "category_id": getattr(channel.category, 'id', None),
+                    "error": f"Bỏ qua do {reason}", "processed": False,
+                    "message_count": 0, "reaction_count": 0, "threads_data": []
+                })
+                continue # Bỏ qua kênh này
+            # --- KẾT THÚC KIỂM TRA ---
+
             perms = channel.permissions_for(server.me)
             can_view = perms.view_channel
             can_read_history = perms.read_message_history
@@ -335,58 +323,39 @@ async def _filter_accessible_channels(scan_data: Dict[str, Any]):
             if can_view and can_read_history:
                 accessible_channels.append(channel)
                 log.debug(f"Kênh {channel_type_emoji} '{channel.name}' ({channel.id}) có thể truy cập.")
-                # Thêm entry cơ bản vào channel_details ngay cả khi truy cập được
-                # Các trường khác sẽ được cập nhật sau khi quét xong kênh
                 channel_details.append({
-                    "type": str(channel.type),
-                    "name": channel.name,
-                    "id": channel.id,
+                    "type": str(channel.type), "name": channel.name, "id": channel.id,
                     "created_at": channel.created_at,
                     "category": getattr(channel.category, 'name', "N/A"),
                     "category_id": getattr(channel.category, 'id', None),
-                    "error": None, # Chưa có lỗi
-                    "processed": False, # Chưa xử lý
-                    "message_count": 0,
-                    "reaction_count": 0,
-                    "threads_data": [] # Khởi tạo list cho threads
+                    "error": None, "processed": False, "message_count": 0,
+                    "reaction_count": 0, "threads_data": []
                 })
             else:
                 skipped_channels_count += 1
                 reason = "Thiếu View Channel" if not can_view else "Thiếu Read History"
                 scan_errors.append(f"Kênh {channel_type_emoji} #{channel.name}: Bỏ qua ({reason}).")
                 log.warning(f"Bỏ qua kênh {channel_type_emoji} [yellow]#{channel.name}[/]: {reason}")
-                # Thêm entry vào channel_details với trạng thái lỗi
                 channel_details.append({
-                    "type": str(channel.type),
-                    "name": channel.name,
-                    "id": channel.id,
+                    "type": str(channel.type), "name": channel.name, "id": channel.id,
                     "created_at": channel.created_at,
                     "category": getattr(channel.category, 'name', "N/A"),
                     "category_id": getattr(channel.category, 'id', None),
-                    "error": f"Bỏ qua do {reason}",
-                    "processed": False, # Đánh dấu không xử lý
-                    "message_count": 0,
-                    "reaction_count": 0,
-                     "threads_data": []
+                    "error": f"Bỏ qua do {reason}", "processed": False,
+                    "message_count": 0, "reaction_count": 0, "threads_data": []
                 })
         except Exception as perm_check_err:
             skipped_channels_count += 1
             error_msg = f"Lỗi kiểm tra quyền kênh #{channel.name}: {perm_check_err}"
             log.error(f"{utils.get_emoji('error', bot)} {error_msg}", exc_info=True)
             scan_errors.append(error_msg)
-            # Thêm entry lỗi
             channel_details.append({
-                "type": str(channel.type),
-                "name": channel.name,
-                "id": channel.id,
-                 "created_at": channel.created_at, # Vẫn cố lấy nếu có
+                "type": str(channel.type), "name": channel.name, "id": channel.id,
+                 "created_at": channel.created_at, 
                  "category": getattr(channel.category, 'name', "N/A"),
                  "category_id": getattr(channel.category, 'id', None),
                 "error": f"Lỗi kiểm tra quyền: {perm_check_err}",
-                "processed": False,
-                "message_count": 0,
-                "reaction_count": 0,
-                 "threads_data": []
+                "processed": False, "message_count": 0, "reaction_count": 0, "threads_data": []
             })
 
     scan_data["accessible_channels"] = accessible_channels
@@ -429,10 +398,14 @@ def _create_start_embed(scan_data: Dict[str, Any]) -> discord.Embed:
         inline=True
     )
 
+    scan_target_desc = f"Quét **{total_accessible_channels}** kênh text/voice ({skipped_channels_count} lỗi/bỏ qua"
+    if config.EXCLUDED_CATEGORY_IDS:
+        scan_target_desc += f", {len(config.EXCLUDED_CATEGORY_IDS)} category đã loại trừ"
+    scan_target_desc += ")."
 
     start_embed.add_field(
         name="Mục tiêu Quét",
-        value=f"Quét **{total_accessible_channels}** kênh text/voice ({skipped_channels_count} bỏ qua).",
+        value=scan_target_desc,
         inline=False
     )
 
@@ -441,7 +414,6 @@ def _create_start_embed(scan_data: Dict[str, Any]) -> discord.Embed:
     else:
         start_embed.add_field(name="Log Chi Tiết", value="Chỉ hiển thị trên Console (Lỗi tạo/quyền thread).", inline=False)
 
-    # Thông báo về Reaction Scan
     can_scan_reactions = scan_data.get("can_scan_reactions", False)
     reaction_scan_status = "Tắt (Cấu hình)"
     if config.ENABLE_REACTION_SCAN:

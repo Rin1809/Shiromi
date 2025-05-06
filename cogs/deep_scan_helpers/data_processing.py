@@ -30,7 +30,7 @@ async def process_additional_data(scan_data: Dict[str, Any]):
     user_activity = scan_data.get("user_activity", {})
 
     log.info(f"\n--- [bold green]{e('stats')} Xử lý Dữ liệu & Tạo Báo cáo cho {server.name}[/bold green] ---")
-    _log_scan_summary(scan_data) # Log tóm tắt quét
+    _log_scan_summary(scan_data) 
 
     log.info(f"{e('loading')} Đang fetch/tính toán dữ liệu phụ trợ...")
 

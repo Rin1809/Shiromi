@@ -76,11 +76,11 @@ def configure_logging():
 
     # 2. Discord Queue Handler (đưa log vào queue để gửi lên Discord)
     discord_queue_handler = discord_logging.DiscordLogHandler()
-    discord_queue_handler.setLevel(logging.DEBUG) # Gửi cả DEBUG log lên Discord
+    discord_queue_handler.setLevel(logging.DEBUG) 
 
     # ---- Root Logger ----
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG) # Mức thấp nhất để bắt mọi log
+    root_logger.setLevel(logging.DEBUG)
 
     # Xóa handlers cũ nếu có (phòng trường hợp re-run)
     if root_logger.hasHandlers():

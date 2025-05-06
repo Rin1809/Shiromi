@@ -1,6 +1,6 @@
 // --- START OF FILE website/client/src/components/SearchBar.tsx ---
 import React from 'react';
-import './styles/SearchBar.css'; // Đường dẫn đúng
+import './styles/SearchBar.css';
 
 interface SearchBarProps {
   value: string;
@@ -21,7 +21,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ value, onChange, onSearch, isLoad
     <div className="search-bar-container">
       <input
         type="text"
-        placeholder="Nhập tên hoặc ID người dùng..."
+        placeholder="Nhập tên hoặc ID ai đó muốn check..."
         value={value}
         onChange={onChange}
         onKeyPress={handleKeyPress}

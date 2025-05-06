@@ -8,10 +8,10 @@ import asyncio
 import time
 from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from discord.ext import commands
-from collections import Counter, defaultdict, OrderedDict # Thêm OrderedDict
+from collections import Counter, defaultdict, OrderedDict 
 import unicodedata
 
-import utils # <--- Chỉ cần import utils
+import utils
 import config
 
 log = logging.getLogger(__name__)

@@ -138,6 +138,7 @@ async def setup_tables():
                     scan_id BIGINT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
                     user_id BIGINT NOT NULL,
                     display_name_at_scan VARCHAR(100),
+                    avatar_url_at_scan VARCHAR(255), -- ĐÃ THÊM CỘT NÀY
                     is_bot BOOLEAN,
                     message_count INTEGER DEFAULT 0,
                     reaction_received_count INTEGER DEFAULT 0,
@@ -377,20 +378,21 @@ async def create_scan_record(guild_id: int, requested_by_user_id: Optional[int])
 async def save_user_scan_results(scan_id: int, user_results: List[Dict[str, Any]]):
     """Lưu hàng loạt kết quả của user vào database."""
     if not pool or not user_results: return
+    # Đảm bảo tên cột avatar_url_at_scan có trong câu lệnh INSERT và UPDATE
     query = """
         INSERT INTO user_scan_results (
-            scan_id, user_id, display_name_at_scan, is_bot, message_count,
+            scan_id, user_id, display_name_at_scan, avatar_url_at_scan, is_bot, message_count,
             reaction_received_count, reaction_given_count, reply_count,
             mention_given_count, mention_received_count, link_count, image_count,
             sticker_count, other_file_count, distinct_channels_count,
             first_seen_utc, last_seen_utc, activity_span_seconds,
             ranking_data, achievement_data
-            -- raw_dm_embed_data (Tùy chọn)
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
         )
         ON CONFLICT (scan_id, user_id) DO UPDATE SET
             display_name_at_scan = EXCLUDED.display_name_at_scan,
+            avatar_url_at_scan = EXCLUDED.avatar_url_at_scan,
             is_bot = EXCLUDED.is_bot, message_count = EXCLUDED.message_count,
             reaction_received_count = EXCLUDED.reaction_received_count,
             reaction_given_count = EXCLUDED.reaction_given_count, reply_count = EXCLUDED.reply_count,
@@ -400,12 +402,12 @@ async def save_user_scan_results(scan_id: int, user_results: List[Dict[str, Any]
             distinct_channels_count = EXCLUDED.distinct_channels_count, first_seen_utc = EXCLUDED.first_seen_utc,
             last_seen_utc = EXCLUDED.last_seen_utc, activity_span_seconds = EXCLUDED.activity_span_seconds,
             ranking_data = EXCLUDED.ranking_data, achievement_data = EXCLUDED.achievement_data;
-            -- raw_dm_embed_data = EXCLUDED.raw_dm_embed_data;
     """
     data_tuples = []
     for user_data in user_results:
         data_tuples.append((
-            scan_id, user_data.get('user_id'), user_data.get('display_name_at_scan'), user_data.get('is_bot'),
+            scan_id, user_data.get('user_id'), user_data.get('display_name_at_scan'),
+            user_data.get('avatar_url_at_scan'), user_data.get('is_bot'),
             user_data.get('message_count', 0), user_data.get('reaction_received_count', 0),
             user_data.get('reaction_given_count', 0), user_data.get('reply_count', 0),
             user_data.get('mention_given_count', 0), user_data.get('mention_received_count', 0),

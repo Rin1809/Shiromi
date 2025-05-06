@@ -56,11 +56,11 @@ async def finalize_scan(scan_data: Dict[str, Any]):
 
     # --- Gửi tin nhắn trung gian vào kênh GỐC (A) ---
     intermediate_message_lines = [
-        f"# Đây là {config.BOT_NAME} <:a_eneuroAYAYA:1367434562245890048> !! \n",
+        f"# Là {config.BOT_NAME} đây <:a_eneuroAYAYA:1367434562245890048> !! \n",
         "## ℹ️ Đã thu thập xong log !!",
         "## 📄 Đã viết xong báo cáo !!\n",
-        f"🔍 Tra cứu kết quả chi tiết tại: <{website_link}>\n", # <<< THÊM LINK WEB
-        f"👉 Ghé qua {report_channel_mention} để xem báo cáo tổng hợp trên Discord!"
+        f"🔍 Tra cứu kết quả của mấy bạn khác tại: <[Bấm vô đây: Hôm qua ᓚᘏᗢ | きのう]({website_link})>\n", # <<< THÊM LINK WEB
+        f"👉 Ghé qua {report_channel_mention} để xem báo cáo tổng hợp của Server trong 1 năm qua trên Discord nhe!"
     ]
     intermediate_message = "\n".join(intermediate_message_lines)
     intermediate_sticker = await utils.fetch_sticker_object(config.INTERMEDIATE_STICKER_ID, bot, server)

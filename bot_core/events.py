@@ -47,7 +47,7 @@ async def handle_on_ready(bot: commands.Bot):
         emoji_val = utils.get_emoji(name, bot)
         is_placeholder = ':123' in emoji_val 
         is_fallback = emoji_val == utils.EMOJI_IDS.get(name, "❓") and name in utils.EMOJI_IDS
-        is_missing = emoji_val == "❓" and name not in utils.EMOJI_IDS # Thực sự thiếu
+        is_missing = emoji_val == "❓" and name not in utils.EMOJI_IDS 
 
         status_str = ""
         if is_missing:
@@ -82,12 +82,12 @@ async def handle_on_ready(bot: commands.Bot):
     except Exception as e_act:
         log.warning(f"Không thể đặt trạng thái hoạt động: {e_act}")
 
-    print("-" * 50) # Kết thúc log khởi động
+    print("-" * 50)
 
 
 async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bot):
     """Xử lý lỗi lệnh một cách tập trung."""
-    e = lambda name: utils.get_emoji(name, bot) # Hàm lambda tiện lợi lấy emoji
+    e = lambda name: utils.get_emoji(name, bot)
 
     # --- LOG DEBUG CHI TIẾT ---
     log.debug(f"--- on_command_error invoked ---")
@@ -105,7 +105,7 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
         # --- LOG DEBUG LỖI GỐC ---
         log.debug(f"--> Original Exception Type: {type(original_exception).__name__}")
         log.debug(f"--> Original Exception Value: {original_exception}")
-        # Log traceback của lỗi gốc nếu có thể
+
         try:
             # Tạo chuỗi traceback thủ công
             tb_lines = traceback.format_exception(type(original_exception), original_exception, original_exception.__traceback__)
@@ -144,7 +144,7 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
         msg = f"{e('error')} Bot thiếu quyền {perms_list} để thực hiện lệnh này."
         reset_cooldown = True # Lỗi do bot, nên reset cooldown cho user
     elif isinstance(error, commands.CheckFailure):
-        # Các check cụ thể (có thể thêm các check tùy chỉnh)
+        # Các check cụ thể 
         if isinstance(error, commands.GuildOnly):
             msg = f"{e('error')} Lệnh này chỉ có thể dùng trong server."
         elif isinstance(error, commands.NotOwner):
@@ -203,7 +203,6 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
             # Lỗi không xác định khác trong quá trình chạy lệnh
             msg = f"{e('error')} Đã xảy ra lỗi khi thực thi lệnh! Vui lòng kiểm tra log chi tiết."
             log.error(f"Lỗi không xác định trong CommandInvokeError: {type(original).__name__}: {original}", exc_info=True) # Log lỗi lạ này
-            # Cân nhắc reset cooldown cho lỗi lạ này
             reset_cooldown = True
     else:
         # Các loại lỗi khác chưa được xử lý cụ thể ở trên
@@ -211,7 +210,7 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
         log.warning(f"Unhandled command error type: {type(error).__name__} - {error}")
         reset_cooldown = True # Reset cho lỗi lạ
 
-    # Gửi tin nhắn lỗi tới người dùng (nếu có)
+    # Gửi tin nhắn lỗi tới người dùng 
     if msg:
         try:
             # Gửi vào kênh gốc hoặc DM nếu kênh gốc không gửi được
@@ -223,13 +222,12 @@ async def handle_on_command_error(ctx: commands.Context, error, bot: commands.Bo
                 await ctx.author.send(f"Lỗi khi chạy lệnh `{ctx.command.qualified_name if ctx.command else 'unknown'}` tại server `{ctx.guild.name if ctx.guild else 'DM'}`:\n{msg}")
             except discord.HTTPException:
                 log.warning(f"Không thể gửi tin nhắn lỗi DM cho {ctx.author.id}.")
-            except AttributeError: # ctx.author có thể không có send (nếu là webhook?)
+            except AttributeError: 
                  log.warning(f"Không thể gửi tin nhắn lỗi DM cho {ctx.author} (không phải User/Member?).")
         except Exception as send_e:
              log.error(f"Lỗi lạ khi gửi tin nhắn lỗi: {send_e}", exc_info=True)
 
 
-    # Reset cooldown nếu cần
     if reset_cooldown and ctx.command and hasattr(ctx.command, "reset_cooldown"):
         ctx.command.reset_cooldown(ctx)
         log.info(f"Đã reset cooldown cho lệnh '{ctx.command.qualified_name}' của user {ctx.author.id} do lỗi.")

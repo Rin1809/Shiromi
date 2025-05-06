@@ -1,11 +1,11 @@
 // --- START OF FILE website/client/src/components/UserInfoDisplay.tsx ---
 import React from 'react';
-import './styles/UserInfoDisplay.css'; // Đường dẫn đúng
+import './styles/UserInfoDisplay.css';
 
-// Định nghĩa kiểu dữ liệu cho user (có thể import từ App.tsx nếu bạn tách ra)
 interface UserScanResult {
   user_id: string;
   display_name_at_scan: string;
+  avatar_url_at_scan?: string | null; 
   is_bot: boolean;
   message_count?: number;
   reaction_received_count?: number;
@@ -18,105 +18,149 @@ interface UserScanResult {
   sticker_count?: number;
   other_file_count?: number;
   distinct_channels_count?: number;
-  first_seen_utc?: string; // Dạng ISO string
-  last_seen_utc?: string;  // Dạng ISO string
+  first_seen_utc?: string;
+  last_seen_utc?: string;
   activity_span_seconds?: number;
-  ranking_data?: Record<string, number>; // VD: {"messages": 1, "replies": 5}
-  achievement_data?: Record<string, any>; // VD: {"top_emoji": {"id": 123, "count": 10}}
+  ranking_data?: Record<string, number>;
+  achievement_data?: Record<string, any>;
 }
 
-// Định nghĩa kiểu props cho component này
 interface UserInfoDisplayProps {
   user: UserScanResult;
   formatRelativeTime: (isoString?: string) => string;
   formatTimeDelta: (seconds?: number) => string;
-  style?: React.CSSProperties; // Thêm prop style để nhận animation delay
+  style?: React.CSSProperties;
 }
 
-// Helper function để hiển thị rank (có thể đưa ra file utils nếu dùng nhiều nơi)
-const renderRank = (rank?: number): string => {
-  return rank ? ` (Hạng #${rank})` : '';
+const renderRank = (rank?: number): React.ReactNode => {
+  return rank ? <span className="rank-indicator">(Hạng #{rank})</span> : null;
 };
 
-// Component UserInfoDisplay
 const UserInfoDisplay: React.FC<UserInfoDisplayProps> = ({ user, formatRelativeTime, formatTimeDelta, style }) => {
+  const rankMapping: Record<string, string> = {
+    messages: "Tổng Tin nhắn",
+    replies: "Trả lời",
+    reaction_received: "Reaction Nhận",
+    reaction_given: "Reaction Thả",
+    distinct_channels: "Số Kênh Khác Nhau",
+    oldest_members: "Thành Viên Lâu Năm",
+    activity_span: "Thời Gian Hoạt Động",
+    booster_duration: "Thời Gian Boost",
+    stickers_sent: "Gửi Sticker",
+    links_sent: "Gửi Link",
+    images_sent: "Gửi Ảnh",
+    custom_emoji_content: "Dùng Custom Emoji",
+    threads_created: "Tạo Thread",
+    mention_given: "Mention Đã Gửi",
+    mention_received: "Mention Đã Nhận",
+  };
+
+  const getAvatarUrl = (user: UserScanResult): string => {
+    if (user.avatar_url_at_scan) {
+      return user.avatar_url_at_scan.replace(/\.webp(\?size=\d+)?$/, '.png?size=64');
+    }
+    // Tính toán avatar mặc định của Discord
+    // Discriminator không còn, nên dựa vào user_id để chọn avatar
+    const avatarIndex = (parseInt(user.user_id) >> 22) % 6; // Hoặc 5 nếu API cũ
+    return `https://cdn.discordapp.com/embed/avatars/${avatarIndex}.png`;
+  };
+
+
   return (
-    // Thêm class "appear" để kích hoạt animation và nhận style từ props
     <div className="user-info-card appear" style={style}>
-      {/* Tên và ID user */}
-      <h2>{user.display_name_at_scan} ({user.user_id}) {user.is_bot ? '🤖' : ''}</h2>
-
-      {/* Phần thông tin về Tin nhắn & Nội dung */}
-      <div className="info-section">
-        <h3>📜 Tin Nhắn & Nội Dung</h3>
-        <p>Tổng tin nhắn: <strong>{user.message_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.messages)}</p>
-        <p>Links đã gửi: {user.link_count?.toLocaleString() ?? '0'}</p>
-        <p>Ảnh đã gửi: {user.image_count?.toLocaleString() ?? '0'}</p>
-        {/* Có thể thêm dòng hiển thị Custom Emoji Count nếu cần */}
-        {/* <p>Emoji Server (Nội dung): {user.achievement_data?.top_content_emoji?.count?.toLocaleString() ?? user.ranking_data?.custom_emoji_content ?? '0'}</p> */}
-        <p>Stickers đã gửi: {user.sticker_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.stickers_sent)}</p>
-        <p>Files khác: {user.other_file_count?.toLocaleString() ?? '0'}</p>
+      <div className="card-header">
+        {/* SỬA ĐỔI ĐỂ HIỂN THỊ AVATAR */}
+        <img
+            src={getAvatarUrl(user)}
+            alt={`${user.display_name_at_scan}'s avatar`}
+            className="user-avatar" // Class mới để style
+            onError={(e) => {
+                // Fallback nếu URL lỗi, hoặc avatar_url_at_scan không có
+                const target = e.target as HTMLImageElement;
+                const avatarIndex = (parseInt(user.user_id) >> 22) % 6;
+                target.src = `https://cdn.discordapp.com/embed/avatars/${avatarIndex}.png`;
+            }}
+        />
+        <div className="user-name-id">
+          <h2>{user.display_name_at_scan} {user.is_bot ? '🤖' : ''}</h2>
+          <span className="user-id-tag">ID: {user.user_id}</span>
+        </div>
       </div>
 
-      {/* Phần thông tin về Tương tác */}
-      <div className="info-section">
-        <h3>💬 Tương Tác</h3>
-        <p>Trả lời đã gửi: {user.reply_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.replies)}</p>
-        <p>Mentions đã gửi: {user.mention_given_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.mention_given)}</p>
-        <p>Mentions nhận: {user.mention_received_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.mention_received)}</p>
-        {/* Chỉ hiển thị reaction nếu có dữ liệu */}
-        {user.reaction_received_count !== undefined && <p>Reactions nhận (lọc): {user.reaction_received_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.reaction_received)}</p>}
-        {user.reaction_given_count !== undefined && <p>Reactions đã thả (lọc): {user.reaction_given_count?.toLocaleString() ?? '0'}{renderRank(user.ranking_data?.reaction_given)}</p>}
-      </div>
-
-      {/* Phần thông tin về Hoạt động */}
-      <div className="info-section">
-          <h3>🎯 Hoạt Động</h3>
-          <p>Số kênh/luồng khác nhau: <strong>{user.distinct_channels_count ?? '0'}</strong>{renderRank(user.ranking_data?.distinct_channels)}</p>
-          {/* TODO: Có thể thêm hiển thị top channel hoạt động của user này nếu có trong achievement_data */}
-      </div>
-
-      {/* Phần thông tin về Thời gian */}
-       <div className="info-section">
-        <h3>⏳ Thời Gian Hoạt Động</h3>
-        <p>Hoạt động đầu tiên: {formatRelativeTime(user.first_seen_utc)}</p>
-        <p>Hoạt động cuối cùng: {formatRelativeTime(user.last_seen_utc)}</p>
-        <p>Khoảng TG hoạt động: <strong>{formatTimeDelta(user.activity_span_seconds)}</strong>{renderRank(user.ranking_data?.activity_span)}</p>
-      </div>
-
-      {/* Phần hiển thị thành tích/rank */}
-      {user.ranking_data && Object.keys(user.ranking_data).length > 0 && (
+      <div className="card-body">
+        <div className="info-grid">
+          {/* Section 1: Tin Nhắn & Nội Dung */}
           <div className="info-section">
-              <h3>🏆 Thành Tích Nổi Bật (Top)</h3>
-              <ul>
-                  {/* Lọc và hiển thị các rank cụ thể */}
-                  {Object.entries(user.ranking_data)
-                    // Chọn các key rank muốn hiển thị ở đây
-                    .filter(([key]) => ['messages', 'replies', 'reaction_received', 'reaction_given', 'distinct_channels', 'oldest_members', 'activity_span', 'booster_duration'].includes(key))
-                    .map(([key, rank]) => (
-                      // Format tên hiển thị cho từng loại rank
-                      <li key={key}>{key.replace('_', ' ').replace('received','nhận').replace('given','đã thả').replace('messages','Tin nhắn').replace('replies','Trả lời').replace('reaction','Reaction').replace('channels','kênh').replace('distinct','khác nhau').replace('oldest members','Lâu năm').replace('activity span','TG Hoạt động').replace('booster duration','Booster')} : <strong>Hạng #{rank}</strong></li>
-                  ))}
-                  {/* Hiển thị rank cho các role được theo dõi */}
-                  {Object.entries(user.ranking_data)
-                      .filter(([key]) => key.startsWith('tracked_role_'))
-                      .map(([key, rank]) => {
-                          const roleId = key.replace('tracked_role_', '');
-                          // TODO: Cần lấy tên role từ roleId. Có thể cần API khác hoặc lưu tên role trong DB.
-                          // Hiện tại chỉ hiển thị ID.
-                          return <li key={key}>Nhận Role {roleId}: <strong>Hạng #{rank}</strong></li>;
-                  })}
-              </ul>
+            <h3 className="section-title"><span role="img" aria-label="Messages">📜</span> Tin Nhắn & Nội Dung</h3>
+            <p>Tổng tin nhắn: <strong>{user.message_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.messages)}</p>
+            <p>Links đã gửi: <strong>{user.link_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.links_sent)}</p>
+            <p>Ảnh đã gửi: <strong>{user.image_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.images_sent)}</p>
+            <p>Stickers đã gửi: <strong>{user.sticker_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.stickers_sent)}</p>
+            <p>Files khác: <strong>{user.other_file_count?.toLocaleString() ?? '0'}</strong></p>
+            {/* Có thể thêm Custom Emoji Count nếu có trong ranking_data hoặc achievement_data */}
+            {user.ranking_data?.custom_emoji_content &&
+                <p>Emoji Server (Nội dung): <strong>{user.achievement_data?.top_content_emoji?.count?.toLocaleString() ?? 'N/A'}</strong>{renderRank(user.ranking_data?.custom_emoji_content)}</p>
+            }
           </div>
-      )}
 
-      {/* TODO: Thêm phần hiển thị achievement_data (vd: top emoji, top sticker) nếu có */}
-      {/* Ví dụ:
-      {user.achievement_data?.top_content_emoji && (
-        <p>Top Emoji: ID {user.achievement_data.top_content_emoji.id} ({user.achievement_data.top_content_emoji.count} lần)</p>
-      )}
-      */}
+          {/* Section 2: Tương Tác */}
+          <div className="info-section">
+            <h3 className="section-title"><span role="img" aria-label="Interactions">💬</span> Tương Tác</h3>
+            <p>Trả lời đã gửi: <strong>{user.reply_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.replies)}</p>
+            <p>Mentions đã gửi: <strong>{user.mention_given_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.mention_given)}</p>
+            <p>Mentions nhận: <strong>{user.mention_received_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.mention_received)}</p>
+            {user.reaction_received_count !== undefined &&
+              <p>Reactions nhận (lọc): <strong>{user.reaction_received_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.reaction_received)}</p>}
+            {user.reaction_given_count !== undefined &&
+              <p>Reactions đã thả (lọc): <strong>{user.reaction_given_count?.toLocaleString() ?? '0'}</strong>{renderRank(user.ranking_data?.reaction_given)}</p>}
+          </div>
 
+          {/* Section 3: Hoạt Động */}
+          <div className="info-section">
+            <h3 className="section-title"><span role="img" aria-label="Activity Scope">🎯</span> Phạm Vi Hoạt Động</h3>
+            <p>Số kênh/luồng khác nhau: <strong>{user.distinct_channels_count ?? '0'}</strong>{renderRank(user.ranking_data?.distinct_channels)}</p>
+             {user.ranking_data?.threads_created &&
+                <p>Số thread đã tạo: <strong>{user.achievement_data?.threads_created_count ?? '0'}</strong>{renderRank(user.ranking_data?.threads_created)}</p>
+            }
+          </div>
+
+          {/* Section 4: Thời Gian */}
+          <div className="info-section">
+            <h3 className="section-title"><span role="img" aria-label="Activity Time">⏳</span> Thời Gian Hoạt Động</h3>
+            <p>Hoạt động đầu tiên: <span className="time-value">{formatRelativeTime(user.first_seen_utc)}</span></p>
+            <p>Hoạt động cuối cùng: <span className="time-value">{formatRelativeTime(user.last_seen_utc)}</span></p>
+            <p>Khoảng TG hoạt động: <strong className="time-value">{formatTimeDelta(user.activity_span_seconds)}</strong>{renderRank(user.ranking_data?.activity_span)}</p>
+          </div>
+        </div>
+
+        {/* Section 5: Thành Tích */}
+        {user.ranking_data && Object.keys(user.ranking_data).length > 0 && (
+          <div className="info-section achievements-section">
+            <h3 className="section-title"><span role="img" aria-label="Achievements">🏆</span> Thành Tích Nổi Bật (Top Server)</h3>
+            <ul className="achievement-list">
+              {Object.entries(user.ranking_data)
+                .filter(([key]) => rankMapping[key]) // Chỉ hiển thị các rank có trong mapping
+                .map(([key, rank]) => (
+                  <li key={key}>
+                    <span className="achievement-name">{rankMapping[key] || key.replace('_', ' ')}:</span>
+                    <strong className="achievement-rank">Hạng #{rank}</strong>
+                  </li>
+              ))}
+               {Object.entries(user.ranking_data)
+                  .filter(([key]) => key.startsWith('tracked_role_'))
+                  .map(([key, rank]) => {
+                      const roleId = key.replace('tracked_role_', '');
+                      return (
+                        <li key={key}>
+                            <span className="achievement-name">Nhận Role <code>{roleId}</code>:</span>
+                            <strong className="achievement-rank">Hạng #{rank}</strong>
+                        </li>
+                      );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

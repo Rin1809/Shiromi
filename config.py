@@ -58,7 +58,7 @@ FINAL_STICKER_ID_STR = os.getenv("FINAL_STICKER_ID")
 FINAL_STICKER_ID = int(FINAL_STICKER_ID_STR) if FINAL_STICKER_ID_STR and FINAL_STICKER_ID_STR.isdigit() else None
 BOT_NAME = os.getenv("BOT_NAME", "Shiromi")
 ENABLE_REACTION_SCAN = os.getenv("ENABLE_REACTION_SCAN", "False").lower() == "true"
-WEBSITE_BASE_URL = os.getenv("WEBSITE_BASE_URL", "http://localhost:3000") # << THÊM MỚI (URL Railway của web)
+WEBSITE_BASE_URL = os.getenv("WEBSITE_BASE_URL", "http://localhost:3000")
 
 # --- Deep Scan Enhancement Configs ---
 TRACKED_ROLE_GRANT_IDS: Set[int] = _parse_id_list("TRACKED_ROLE_GRANT_IDS")
@@ -76,6 +76,11 @@ log.info(f"Unicode Reactions được phép trong BXH: {REACTION_UNICODE_EXCEPTI
 ADMIN_ROLE_IDS_FILTER: Set[int] = _parse_id_list("ADMIN_ROLE_IDS_FILTER")
 log.info(f"IDs Role Admin bổ sung cần lọc khỏi BXH: {ADMIN_ROLE_IDS_FILTER if ADMIN_ROLE_IDS_FILTER else 'Không có'}")
 QUY_TOC_ANH_MAPPING: Dict[str, str] = _load_quy_toc_anh_mapping()
+
+# --- THÊM CONFIG MỚI ---
+EXCLUDED_CATEGORY_IDS: Set[int] = _parse_id_list("EXCLUDED_CATEGORY_IDS")
+log.info(f"IDs Category bị loại trừ khỏi quét: {EXCLUDED_CATEGORY_IDS if EXCLUDED_CATEGORY_IDS else 'Không có'}")
+# ---------------------
 
 # --- Cấu hình Kênh Báo cáo và Sticker/Emoji ---
 REPORT_CHANNEL_ID: Optional[int] = _parse_id("REPORT_CHANNEL_ID")
@@ -107,10 +112,8 @@ def check_critical_config():
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN": critical_missing.append("DISCORD_TOKEN")
     if not DATABASE_URL: critical_missing.append("DATABASE_URL")
     if not ADMIN_USER_ID: critical_missing.append("ADMIN_USER_ID")
-    # Thêm kiểm tra WEBSITE_BASE_URL nếu muốn bắt buộc
     if not WEBSITE_BASE_URL or WEBSITE_BASE_URL == "http://localhost:3000":
         log.warning("Biến môi trường WEBSITE_BASE_URL chưa được đặt hoặc đang dùng giá trị mặc định.")
-        # critical_missing.append("WEBSITE_BASE_URL") # Bỏ comment nếu muốn bắt buộc
 
     if critical_missing:
         print("[LỖI CẤU HÌNH NGHIÊM TRỌNG] Thiếu các biến môi trường sau:")

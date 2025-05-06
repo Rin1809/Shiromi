@@ -46,7 +46,7 @@ router.get('/scan/:guildId/user', async (req, res) => {
     if (isNumericId) {
         // Tìm chính xác theo User ID
         userQuery = `
-            SELECT user_id, display_name_at_scan, is_bot, message_count,
+            SELECT user_id, display_name_at_scan, avatar_url_at_scan, is_bot, message_count,
                    reaction_received_count, reaction_given_count, reply_count,
                    mention_given_count, mention_received_count, link_count, image_count,
                    sticker_count, other_file_count, distinct_channels_count,
@@ -59,7 +59,7 @@ router.get('/scan/:guildId/user', async (req, res) => {
     } else {
         // Tìm gần đúng theo tên (không phân biệt hoa thường)
         userQuery = `
-            SELECT user_id, display_name_at_scan, is_bot, message_count,
+            SELECT user_id, display_name_at_scan, avatar_url_at_scan, is_bot, message_count,
                    reaction_received_count, reaction_given_count, reply_count,
                    mention_given_count, mention_received_count, link_count, image_count,
                    sticker_count, other_file_count, distinct_channels_count,
