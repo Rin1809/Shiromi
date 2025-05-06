@@ -8,7 +8,8 @@ import datetime
 import re
 from typing import Dict, Any, List, Union, Optional, Set, Tuple
 from collections import Counter, defaultdict
-
+import dotenv
+import os
 import config
 import utils
 import discord_logging
@@ -18,6 +19,11 @@ log = logging.getLogger(__name__)
 # Biểu thức chính quy để tối ưu việc tìm kiếm
 URL_REGEX = re.compile(r'https?://\S+')
 EMOJI_REGEX = re.compile(r'<a?:([a-zA-Z0-9_]+):([0-9]+)>|([\U00010000-\U0010ffff])') # Capture cả group unicode
+
+# --- Hằng số cho quét song song ---
+MAX_CONCURRENT_SCANS = config.MAX_CONCURRENT_CHANNEL_SCANS # Số kênh/luồng quét đồng thời tối đa
+scan_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+
 
 # --- Hàm quét tin nhắn (được dùng cho cả kênh và luồng) ---
 async def _process_message(message: discord.Message, scan_data: Dict[str, Any], location_id: int):
@@ -261,293 +267,24 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
             log.warning(f"Lỗi xử lý reaction msg {message.id} location {location_id}: {react_err}")
 
 
-# --- Các hàm quét kênh/luồng ---
-
-async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
-    """Quét tất cả các kênh và luồng có thể truy cập."""
-    accessible_channels: List[Union[discord.TextChannel, discord.VoiceChannel]] = scan_data["accessible_channels"]
-    total_accessible_channels = len(accessible_channels)
-    bot: commands.Bot = scan_data["bot"]
-    e = lambda name: utils.get_emoji(name, bot)
-
-    log.info(f"Bắt đầu quét {total_accessible_channels} kênh...")
-
-    last_status_update_time = scan_data["overall_start_time"]
-    update_interval_seconds = 12
-    status_message = scan_data["initial_status_msg"]
-
-    processed_channels_count = 0
-    processed_threads_count = 0
-    skipped_threads_count = 0 # Khởi tạo biến đếm thread bị bỏ qua
-
-    for current_channel_index, channel in enumerate(accessible_channels, 1):
-        channel_message_count = 0
-        channel_scan_start_time = discord.utils.utcnow()
-        channel_processed_flag = False
-        channel_error: Optional[str] = None
-        author_counter_channel: Counter = Counter()
-        channel_threads_data: List[Dict[str, Any]] = []
-
-        channel_type_emoji = utils.get_channel_type_emoji(channel, bot)
-        channel_type_name = "Voice" if isinstance(channel, discord.VoiceChannel) else "Text"
-
-        log.info(f"[bold]({current_channel_index}/{total_accessible_channels})[/bold] Đang quét kênh {channel_type_name} {channel_type_emoji} [cyan]#{channel.name}[/] ({channel.id})")
-
-        channel_status_embed = discord.Embed(
-            title=f"{e('loading')} Bắt đầu quét: {channel_type_emoji} #{channel.name}",
-            description=f"Kênh {current_channel_index}/{total_accessible_channels}\nĐang đọc lịch sử...",
-            color=discord.Color.yellow()
-        )
-        status_message = await _update_status_message(scan_data["ctx"], status_message, channel_status_embed)
-        scan_data["status_message"] = status_message
-
-        try:
-            if isinstance(channel, discord.VoiceChannel):
-                log.debug(f"Attempting to get history for VOICE channel #{channel.name} ({channel.id})")
-
-            message_iterator = channel.history(limit=None) # Giới hạn None để lấy hết
-            messages_found_in_voice = 0 # Biến đếm tạm
-
-            async for message in message_iterator:
-                if isinstance(channel, discord.VoiceChannel):
-                    messages_found_in_voice += 1
-                    if messages_found_in_voice % 100 == 0: # Log mỗi 100 tin
-                        log.debug(f"Đã duyệt {messages_found_in_voice} tin nhắn trong kênh VOICE tên #{channel.name} ")
-
-                await _process_message(message, scan_data, channel.id)
-                channel_message_count += 1
-                channel_processed_flag = True # Đánh dấu đã xử lý ít nhất 1 tin
-                if message.author and not message.author.bot:
-                    author_counter_channel[message.author.id] += 1
-
-                now = discord.utils.utcnow()
-                if (now - last_status_update_time).total_seconds() > update_interval_seconds:
-                    status_embed = _create_progress_embed(scan_data, channel, current_channel_index, channel_message_count, channel_scan_start_time, now)
-                    status_message = await _update_status_message(scan_data["ctx"], status_message, status_embed)
-                    scan_data["status_message"] = status_message
-                    last_status_update_time = now
-
-            if isinstance(channel, discord.VoiceChannel):
-                log.info(f"  Finished scanning VOICE channel #{channel.name}. Total messages found: {messages_found_in_voice}")
-
-
-            channel_scan_duration = discord.utils.utcnow() - channel_scan_start_time
-            log.info(f"  {e('success')} Hoàn thành kênh {channel_type_name} {channel_type_emoji} [cyan]#{channel.name}[/]: {channel_message_count:,} tin nhắn trong [magenta]{utils.format_timedelta(channel_scan_duration)}[/].")
-
-            # --- Thu thập chi tiết kênh SAU KHI QUÉT XONG ---
-            detail_entry = next((item for item in scan_data["channel_details"] if item.get('id') == channel.id), None)
-
-            if detail_entry:
-                log.info(f"  {e('info')} Đang cập nhật chi tiết kênh {channel_type_name} {channel_type_emoji} [cyan]#{channel.name}[/]...")
-                await _update_channel_details_after_scan(
-                    scan_data, channel, detail_entry, author_counter_channel,
-                    channel_message_count, channel_scan_duration, channel_error
-                )
-                detail_entry["processed"] = True
-                processed_channels_count += 1
-            else:
-                 log.error(f"  {e('error')} Không tìm thấy detail_entry cho kênh {channel.id} để cập nhật chi tiết.")
-                 detail_entry = {} # Tạo dict rỗng để truyền vào scan thread nếu cần
-
-            # --- Quét luồng ---
-            if isinstance(channel, discord.TextChannel):
-                 threads_scanned_count, threads_skipped_in_channel = await _scan_threads_in_channel(scan_data, channel, detail_entry)
-                 processed_threads_count += threads_scanned_count
-                 skipped_threads_count += threads_skipped_in_channel # Cộng dồn số thread bỏ qua
-            else:
-                 log.info(f"  {e('thread')} Bỏ qua quét luồng cho kênh voice {channel_type_emoji} [cyan]#{channel.name}[/].")
-
-            log.info(f"  {e('success')} Hoàn thành xử lý kênh và luồng (nếu có) cho {channel_type_name} {channel_type_emoji} [cyan]#{channel.name}[/].")
-            await asyncio.sleep(0.1) # Delay nhẹ giữa các kênh
-
-        except Exception as e_channel:
-             channel_error_msg = f"Lỗi kênh {channel_type_name} #{channel.name}: {e_channel}"
-             log.error(f"{utils.get_emoji('error', bot)} {channel_error_msg}", exc_info=not isinstance(e_channel, discord.Forbidden))
-             scan_data["scan_errors"].append(channel_error_msg)
-
-             detail_entry = next((item for item in scan_data["channel_details"] if item.get('id') == channel.id), None)
-             if detail_entry:
-                 existing_error = str(detail_entry.get("error") or "")
-                 error_prefix = "FATAL SCAN ERROR: " if not channel_processed_flag else "PARTIAL SCAN ERROR: "
-                 full_error = f"{error_prefix}{channel_error_msg}"
-                 detail_entry["error"] = (existing_error + f"\n{full_error}").strip()
-                 detail_entry["processed"] = channel_processed_flag # Đánh dấu xử lý lỗi
-             else:
-                  log.error(f"  {e('error')} Không tìm thấy detail_entry cho kênh lỗi {channel.id} để ghi lỗi.")
-
-             try:
-                 await scan_data["ctx"].send(f"{utils.get_emoji('error', bot)} {channel_error_msg}. Dữ liệu kênh #{channel.name} có thể không đầy đủ.", delete_after=30)
-             except Exception: pass
-             await asyncio.sleep(2) # Delay sau lỗi kênh
-
-    # Cập nhật số lượng tổng cuối cùng vào scan_data
-    scan_data["processed_channels_count"] = processed_channels_count
-    scan_data["processed_threads_count"] = processed_threads_count
-    scan_data["skipped_threads_count"] = skipped_threads_count # Cập nhật số thread đã bỏ qua
-
-    log.info("Hoàn thành quét tất cả các kênh và luồng.")
-
-
-async def _scan_threads_in_channel(
+# --- Hàm Helper để cập nhật chi tiết cho một location (kênh hoặc luồng) ---
+async def _populate_additional_location_details(
     scan_data: Dict[str, Any],
-    parent_channel: discord.TextChannel,
-    channel_detail_entry: Dict[str, Any] # Nhận detail_entry để cập nhật
-) -> Tuple[int, int]: # Trả về số thread quét thành công và số thread bỏ qua
-    """Quét tất cả các luồng (active và archived) trong một kênh text."""
-    server: discord.Guild = scan_data["server"]
-    bot: commands.Bot = scan_data["bot"]
-    e = lambda name: utils.get_emoji(name, bot)
-    can_scan_archived = scan_data.get("can_scan_archived_threads", False)
-    scan_errors: List[str] = scan_data["scan_errors"]
-
-    threads_scanned_ok = 0
-    threads_skipped = 0
-
-    log.info(f"  {e('thread')} Đang kiểm tra luồng trong kênh text {e('text_channel')} [cyan]#{parent_channel.name}[/]...")
-
-    threads_to_scan: List[discord.Thread] = []
-    try:
-        threads_to_scan.extend(parent_channel.threads)
-
-        if can_scan_archived:
-            log.info(f"    Đang fetch luồng lưu trữ...")
-            try:
-                async for thread in parent_channel.archived_threads(limit=None):
-                    threads_to_scan.append(thread)
-                log.info(f"    Fetch xong luồng lưu trữ.")
-            except discord.Forbidden:
-                 log.warning(f"    Thiếu quyền fetch luồng lưu trữ cho kênh #{parent_channel.name}.")
-                 scan_errors.append(f"Thiếu quyền fetch luồng lưu trữ kênh #{parent_channel.name}.")
-            except discord.HTTPException as arch_http_err:
-                 log.error(f"    Lỗi HTTP khi fetch luồng lưu trữ kênh #{parent_channel.name}: {arch_http_err.status}")
-                 scan_errors.append(f"Lỗi HTTP fetch luồng lưu trữ kênh #{parent_channel.name}.")
-            except Exception as arch_err:
-                 log.error(f"    Lỗi không xác định khi fetch luồng lưu trữ kênh #{parent_channel.name}: {arch_err}", exc_info=True)
-                 scan_errors.append(f"Lỗi fetch luồng lưu trữ kênh #{parent_channel.name}.")
-        else:
-            log.info("    Bỏ qua luồng lưu trữ do thiếu quyền.")
-
-        unique_threads_map: Dict[int, discord.Thread] = {t.id: t for t in threads_to_scan}
-        unique_threads_to_scan = list(unique_threads_map.values())
-        total_threads_found = len(unique_threads_to_scan)
-
-        if total_threads_found == 0:
-            log.info(f"  {e('info')} Không tìm thấy luồng trong kênh text [cyan]#{parent_channel.name}[/].")
-            channel_detail_entry["threads_data"] = []
-            return 0, 0
-
-        log.info(f"  Tìm thấy {total_threads_found} luồng. Bắt đầu quét...")
-        threads_data_list = []
-
-        for thread_index, thread in enumerate(unique_threads_to_scan, 1):
-            thread_message_count = 0
-            thread_scan_start_time = discord.utils.utcnow()
-            thread_processed_flag = False
-            error_in_thread: Optional[str] = None
-            thread_data_entry: Dict[str, Any] = {
-                 "id": thread.id, "name": thread.name, "archived": thread.archived,
-                 "locked": thread.locked,
-                 "created_at": thread.created_at.isoformat() if thread.created_at else None,
-                 "owner_id": thread.owner_id, "owner_mention": "N/A", "owner_name": "N/A",
-                 "message_count": 0, "reaction_count": None,
-                 "scan_duration_seconds": 0, "error": None
-            }
-
-            try:
-                thread_perms = thread.permissions_for(server.me)
-                if not thread_perms.view_channel or not thread_perms.read_message_history:
-                    reason = "Thiếu View" if not thread_perms.view_channel else "Thiếu Read History"
-                    log.warning(f"    Bỏ qua luồng '{thread.name}' ({thread.id}): {reason}.")
-                    scan_errors.append(f"Luồng '{thread.name}' ({thread.id}): Bỏ qua ({reason}).")
-                    threads_skipped += 1
-                    thread_data_entry["error"] = f"Bỏ qua do {reason}"
-                    threads_data_list.append(thread_data_entry)
-                    continue
-            except Exception as thread_perm_err:
-                log.error(f"    {e('error')} Lỗi kiểm tra quyền luồng '{thread.name}': {thread_perm_err}", exc_info=True)
-                scan_errors.append(f"Luồng '{thread.name}': Lỗi kiểm tra quyền.")
-                threads_skipped += 1
-                thread_data_entry["error"] = f"Lỗi kiểm tra quyền: {thread_perm_err}"
-                threads_data_list.append(thread_data_entry)
-                continue
-
-            log.info(f"    [bold]({thread_index}/{total_threads_found})[/bold] Đang quét luồng [magenta]'{thread.name}'[/] ({thread.id})...")
-
-            try:
-                thread_message_iterator = thread.history(limit=None)
-                async for message in thread_message_iterator:
-                    await _process_message(message, scan_data, thread.id)
-                    thread_message_count += 1
-                    thread_processed_flag = True
-
-                thread_scan_duration = discord.utils.utcnow() - thread_scan_start_time
-                log.info(f"      {e('success')} Hoàn thành quét luồng [magenta]'{thread.name}'[/]: {thread_message_count:,} tin nhắn trong [magenta]{utils.format_timedelta(thread_scan_duration)}[/].")
-                threads_scanned_ok += 1
-                thread_data_entry["message_count"] = thread_message_count
-                thread_data_entry["scan_duration_seconds"] = round(thread_scan_duration.total_seconds(), 2)
-
-            except discord.Forbidden as e_forbidden:
-                 error_in_thread = f"Thiếu quyền: {e_forbidden.text}"
-            except discord.HTTPException as e_http:
-                 error_in_thread = f"Lỗi mạng (HTTP {e_http.status}): {e_http.text}"; await asyncio.sleep(3)
-            except Exception as e_thread:
-                 error_in_thread = f"Lỗi không xác định: {e_thread}"
-
-            if error_in_thread:
-                 log.error(f"    {e('error')} {error_in_thread} khi quét luồng '{thread.name}'", exc_info=not isinstance(error_in_thread, (discord.Forbidden, discord.HTTPException)))
-                 scan_errors.append(f"Luồng '{thread.name}' ({thread.id}): {error_in_thread}")
-                 thread_data_entry["error"] = error_in_thread
-                 if not thread_processed_flag:
-                     threads_skipped += 1
-
-            if thread.owner_id:
-                try:
-                    owner = await utils.fetch_user_data(server, thread.owner_id, bot_ref=bot)
-                    if owner:
-                         thread_data_entry["owner_mention"] = owner.mention
-                         thread_data_entry["owner_name"] = owner.display_name
-                    else:
-                         thread_data_entry["owner_mention"] = f"ID: {thread.owner_id}"
-                         thread_data_entry["owner_name"] = "(Không tìm thấy)"
-                except Exception as owner_err:
-                    log.warning(f"Không thể fetch owner luồng {thread.id}: {owner_err}")
-                    thread_data_entry["owner_mention"] = f"ID: {thread.owner_id} (Lỗi fetch)"
-
-            threads_data_list.append(thread_data_entry)
-            await asyncio.sleep(0.05)
-
-        log.info(f"  {e('success')} Hoàn thành quét {threads_scanned_ok} luồng trong kênh #{parent_channel.name} ({threads_skipped} bị bỏ qua).")
-        channel_detail_entry["threads_data"] = threads_data_list
-
-    except Exception as e_outer_thread:
-        log.error(f"Lỗi nghiêm trọng khi xử lý luồng cho kênh #{parent_channel.name}: {e_outer_thread}", exc_info=True)
-        scan_errors.append(f"Lỗi nghiêm trọng khi xử lý luồng kênh #{parent_channel.name}: {e_outer_thread}")
-        if "threads_data" not in channel_detail_entry:
-            channel_detail_entry["threads_data"] = []
-
-    return threads_scanned_ok, threads_skipped
-
-
-async def _update_channel_details_after_scan(
-    scan_data: Dict[str, Any],
-    channel: Union[discord.TextChannel, discord.VoiceChannel],
-    detail_entry: Dict[str, Any], # Nhận entry đã tồn tại
-    author_counter_channel: Counter,
-    channel_message_count: int,
-    channel_scan_duration: datetime.timedelta,
-    channel_error: Optional[str]
+    location: Union[discord.TextChannel, discord.VoiceChannel, discord.Thread],
+    result_dict_to_update: Dict[str, Any] # Dict kết quả của location này
 ):
-    """Cập nhật chi tiết kênh vào detail_entry đã có sau khi quét xong tin nhắn."""
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     e = lambda name: utils.get_emoji(name, bot)
 
-    # Lấy top chatter
+    channel_message_count = result_dict_to_update.get("message_count", 0)
+    author_counter_location = result_dict_to_update.get("author_counts", Counter())
+
     top_chatter_info = "Không có (hoặc chỉ bot)"
     top_chatter_roles = "N/A"
-    if author_counter_channel:
+    if author_counter_location:
         try:
-            top_author_id, top_count = author_counter_channel.most_common(1)[0]
+            top_author_id, top_count = author_counter_location.most_common(1)[0]
             user = await utils.fetch_user_data(server, top_author_id, bot_ref=bot)
             if user:
                 top_chatter_info = f"{user.mention} (`{utils.escape_markdown(user.display_name)}`) - {top_count:,} tin"
@@ -555,82 +292,233 @@ async def _update_channel_details_after_scan(
                     member_roles = sorted([r for r in user.roles if not r.is_default()], key=lambda r: r.position, reverse=True)
                     roles_str = ", ".join([r.mention for r in member_roles]) if member_roles else "Không có role"
                     top_chatter_roles = roles_str[:150] + "..." if len(roles_str) > 150 else roles_str
-                else:
-                    top_chatter_roles = "N/A (Không còn trong server)"
-            else:
-                top_chatter_info = f"ID: `{top_author_id}` (Không tìm thấy) - {top_count:,} tin"
+                else: top_chatter_roles = "N/A (Không còn trong server)"
+            else: top_chatter_info = f"ID: `{top_author_id}` (Không tìm thấy) - {top_count:,} tin"
         except Exception as chatter_err:
-            log.error(f"Lỗi lấy top chatter kênh #{channel.name}: {chatter_err}")
+            log.error(f"Lỗi lấy top chatter cho {location.name}: {chatter_err}")
             top_chatter_info = f"{e('error')} Lỗi lấy top chatter"
+    result_dict_to_update["top_chatter_info"] = top_chatter_info
+    result_dict_to_update["top_chatter_roles"] = top_chatter_roles
 
-    # Lấy tin nhắn đầu
-    first_messages_log: List[str] = []
-    first_messages_limit = 5
-    first_messages_preview = 80
-    try:
-        async for msg in channel.history(limit=first_messages_limit, oldest_first=True):
-            author_display = msg.author.display_name if msg.author else "Không rõ"
-            timestamp_str = msg.created_at.strftime('%d/%m/%y %H:%M')
-            content_preview = (msg.content or "")[:first_messages_preview].replace('`', "'").replace('\n', ' ')
-            if len(msg.content or "") > first_messages_preview: content_preview += "..."
-            elif not content_preview and msg.attachments: content_preview = "[File đính kèm]"
-            elif not content_preview and msg.embeds: content_preview = "[Embed]"
-            elif not content_preview and msg.stickers: content_preview = "[Sticker]"
-            elif not content_preview: content_preview = "[Nội dung trống]"
-            first_messages_log.append(f"[`{timestamp_str}`] **{utils.escape_markdown(author_display)}**: {utils.escape_markdown(content_preview)}")
+    first_messages_log_list: List[str] = []
+    if isinstance(location, (discord.TextChannel, discord.VoiceChannel)):
+        first_messages_limit = 5; first_messages_preview = 80
+        try:
+            async for msg in location.history(limit=first_messages_limit, oldest_first=True):
+                author_display = msg.author.display_name if msg.author else "Không rõ"
+                timestamp_str = msg.created_at.strftime('%d/%m/%y %H:%M')
+                content_preview = (msg.content or "")[:first_messages_preview].replace('`', "'").replace('\n', ' ')
+                if len(msg.content or "") > first_messages_preview: content_preview += "..."
+                elif not content_preview and msg.attachments: content_preview = "[File đính kèm]"
+                elif not content_preview and msg.embeds: content_preview = "[Embed]"
+                elif not content_preview and msg.stickers: content_preview = "[Sticker]"
+                elif not content_preview: content_preview = "[Nội dung trống]"
+                first_messages_log_list.append(f"[`{timestamp_str}`] **{utils.escape_markdown(author_display)}**: {utils.escape_markdown(content_preview)}")
+            if not first_messages_log_list and channel_message_count == 0: first_messages_log_list.append("`[Không có tin nhắn]`")
+            elif not first_messages_log_list and channel_message_count > 0: first_messages_log_list.append("`[LỖI]` Không thể fetch tin nhắn đầu.")
+        except Exception as e_first:
+            log.error(f"Lỗi lấy tin nhắn đầu cho {location.name}: {e_first}")
+            first_messages_log_list = [f"`[LỖI]` {e('error')} Lỗi: {e_first}"]
+            err_key = "error"; current_err = result_dict_to_update.get(err_key, "")
+            result_dict_to_update[err_key] = (current_err + f"\nLỗi lấy tin nhắn đầu: {e_first}").strip()
+    result_dict_to_update["first_messages_log"] = first_messages_log_list
 
-        if not first_messages_log and channel_message_count == 0:
-             first_messages_log.append("`[Không có tin nhắn]`")
-        elif not first_messages_log and channel_message_count > 0:
-             first_messages_log.append("`[LỖI]` Không thể fetch tin nhắn đầu.")
-    except Exception as e_first:
-        log.error(f"Lỗi lấy tin nhắn đầu kênh #{channel.name}: {e_first}")
-        first_messages_log = [f"`[LỖI]` {e('error')} Lỗi: {e_first}"]
-        channel_error = (channel_error + f"\nLỗi lấy tin nhắn đầu: {e_first}").strip() if channel_error else f"Lỗi lấy tin nhắn đầu: {e_first}"
+    channel_topic = "N/A"; channel_nsfw_str = "N/A"; channel_slowmode_str = "N/A"
+    if isinstance(location, discord.TextChannel):
+        channel_topic = (location.topic or "Không có")[:150] + ("..." if location.topic and len(location.topic) > 150 else "")
+        channel_nsfw_str = f"{e('success')} Có" if location.is_nsfw() else f"{e('error')} Không"
+        channel_slowmode_str = f"{location.slowmode_delay} giây" if location.slowmode_delay > 0 else "Không"
+    elif isinstance(location, discord.VoiceChannel):
+        channel_nsfw_str = f"{e('success')} Có" if location.is_nsfw() else f"{e('error')} Không"
+    result_dict_to_update["topic"] = channel_topic
+    result_dict_to_update["nsfw_str"] = channel_nsfw_str
+    result_dict_to_update["slowmode_str"] = channel_slowmode_str
+    result_dict_to_update["reaction_count_filtered"] = None
 
-    # Lấy thông tin kênh
-    channel_topic = "N/A"
-    channel_nsfw_str = "N/A"
-    channel_slowmode_str = "N/A"
-    if isinstance(channel, discord.TextChannel):
-        channel_topic = (channel.topic or "Không có")[:150] + ("..." if channel.topic and len(channel.topic) > 150 else "")
-        channel_nsfw_str = f"{e('success')} Có" if channel.is_nsfw() else f"{e('error')} Không"
-        channel_slowmode_str = f"{channel.slowmode_delay} giây" if channel.slowmode_delay > 0 else "Không"
-    elif isinstance(channel, discord.VoiceChannel):
-        channel_nsfw_str = f"{e('success')} Có" if channel.is_nsfw() else f"{e('error')} Không"
-        channel_topic = "N/A (Kênh Voice)"
-        channel_slowmode_str = "N/A (Kênh Voice)"
 
-    # Tính toán reaction count (tạm thời lấy tổng đã lọc)
-    filtered_channel_reaction_count = None
-    if config.ENABLE_REACTION_SCAN:
-        # Tạm thời lấy tổng reactions đã lọc toàn server vì chưa có counter reaction theo kênh
-        # TODO: Nếu cần reaction theo kênh, cần thêm logic đếm riêng trong _process_message
-        # Hiện tại chưa có nên để là None
-        pass
+# --- Hàm Wrapper để quét một location (kênh hoặc luồng) ---
+async def _scan_individual_location_wrapper(
+    scan_data: Dict[str, Any],
+    location: Union[discord.TextChannel, discord.VoiceChannel, discord.Thread],
+) -> Dict[str, Any]:
+    location_message_count = 0
+    location_error: Optional[str] = None
+    author_counter_location: Counter = Counter()
+    location_scan_start_time = discord.utils.utcnow()
+    processed_flag = False
 
-    # Cập nhật detail_entry
-    update_data = {
-        "message_count": channel_message_count,
-        "reaction_count": filtered_channel_reaction_count, # Sẽ là None nếu chưa có logic đếm theo kênh
-        "duration_seconds": round(channel_scan_duration.total_seconds(), 2),
-        "topic": channel_topic,
-        "nsfw": channel_nsfw_str,
-        "slowmode": channel_slowmode_str,
-        "top_chatter": top_chatter_info,
-        "top_chatter_roles": top_chatter_roles,
-        "first_messages_log": first_messages_log,
-        "error": channel_error
+    log_prefix = f"Thread '{location.name}' ({location.id})" if isinstance(location, discord.Thread) else f"Channel '{location.name}' ({location.id})"
+    log.info(f"Wrapper: Bắt đầu quét {log_prefix}")
+
+    result = {
+        "id": location.id, "name": location.name, "type": str(location.type),
+        "processed": False, "message_count": 0, "error": None,
+        "scan_duration_seconds": 0.0, "author_counts": Counter(),
+        "threads_data": []
     }
-    detail_entry.update(update_data)
+    if isinstance(location, (discord.TextChannel, discord.VoiceChannel)):
+        result["category"] = getattr(location.category, 'name', "N/A")
+        result["category_id"] = getattr(location.category, 'id', None)
+        result["created_at"] = location.created_at
+    if isinstance(location, discord.Thread):
+        result["parent_channel_id"] = location.parent_id
+        result["archived"] = location.archived
+        result["locked"] = location.locked
+        if location.owner_id:
+            owner = await utils.fetch_user_data(scan_data["server"], location.owner_id, bot_ref=scan_data["bot"])
+            result["owner_id"] = location.owner_id
+            result["owner_mention"] = owner.mention if owner else f"ID: {location.owner_id}"
+            result["owner_name"] = owner.display_name if owner else "(Không tìm thấy)"
+
+    try:
+        if isinstance(location, discord.Thread):
+            thread_perms = location.permissions_for(scan_data["server"].me)
+            if not thread_perms.view_channel or not thread_perms.read_message_history:
+                reason = "Thiếu View" if not thread_perms.view_channel else "Thiếu Read History"
+                location_error = f"Bỏ qua luồng '{location.name}' ({location.id}): {reason}."
+                result["error"] = location_error; result["processed"] = False
+                result["scan_duration_seconds"] = (discord.utils.utcnow() - location_scan_start_time).total_seconds()
+                log.warning(location_error)
+                scan_data["scan_errors"].append(location_error)
+                return result
+
+        message_iterator = location.history(limit=None)
+        async for message in message_iterator:
+            await _process_message(message, scan_data, location.id)
+            location_message_count += 1
+            if message.author and not message.author.bot:
+                author_counter_location[message.author.id] += 1
+        processed_flag = True
+
+    except discord.Forbidden as forbidden_err:
+        location_error = f"Lỗi quyền quét {log_prefix}: {forbidden_err.text}"
+    except discord.HTTPException as http_err:
+        location_error = f"Lỗi HTTP {http_err.status} quét {log_prefix}: {http_err.text}"
+        await asyncio.sleep(2)
+    except Exception as e_loc:
+        location_error = f"Lỗi không xác định quét {log_prefix}: {e_loc}"
+
+    if location_error:
+        log.error(location_error, exc_info=True)
+        scan_data["scan_errors"].append(location_error)
+        result["error"] = location_error
+    result["processed"] = processed_flag
+    result["message_count"] = location_message_count
+    result["author_counts"] = author_counter_location
+
+    await _populate_additional_location_details(scan_data, location, result)
+
+    result["scan_duration_seconds"] = (discord.utils.utcnow() - location_scan_start_time).total_seconds()
+    log.info(f"Wrapper: Hoàn thành {log_prefix}. Tin: {result['message_count']}. Thời gian: {result['scan_duration_seconds']:.2f}s. Lỗi: {result['error']}")
+    return result
 
 
+# --- Hàm xử lý một kênh và các luồng con của nó ---
+async def _process_single_channel_and_its_threads(
+    scan_data: Dict[str, Any],
+    channel: Union[discord.TextChannel, discord.VoiceChannel]
+) -> Dict[str, Any]:
+    async with scan_semaphore:
+        log.info(f"Bắt đầu xử lý song song cho kênh: {channel.name} ({channel.id})")
+        channel_result = await _scan_individual_location_wrapper(scan_data, channel)
+
+        if isinstance(channel, discord.TextChannel) and channel_result.get("processed"):
+            threads_to_scan: List[discord.Thread] = []
+            try:
+                threads_to_scan.extend(channel.threads)
+                if scan_data.get("can_scan_archived_threads", False):
+                    log.debug(f"  Fetching archived threads cho kênh {channel.name}...")
+                    async for thread_obj in channel.archived_threads(limit=None):
+                        threads_to_scan.append(thread_obj)
+            except Exception as e_fetch_thread:
+                log.error(f"  Lỗi fetch threads cho kênh {channel.name}: {e_fetch_thread}")
+                scan_data["scan_errors"].append(f"Lỗi fetch threads kênh {channel.name}: {e_fetch_thread}")
+
+            unique_threads_map: Dict[int, discord.Thread] = {t.id: t for t in threads_to_scan}
+            unique_threads_to_scan = list(unique_threads_map.values())
+
+            if unique_threads_to_scan:
+                log.info(f"  Kênh {channel.name} có {len(unique_threads_to_scan)} luồng để quét song song.")
+                thread_tasks = [
+                    asyncio.create_task(_scan_individual_location_wrapper(scan_data, thread_obj))
+                    for thread_obj in unique_threads_to_scan
+                ]
+                thread_scan_results = await asyncio.gather(*thread_tasks, return_exceptions=True)
+                channel_result["threads_data"] = [res for res in thread_scan_results if isinstance(res, dict)]
+                for res_thread_err in thread_scan_results:
+                    if isinstance(res_thread_err, Exception):
+                        log.error(f"    Lỗi trong một task quét luồng (kênh {channel.name}): {res_thread_err}")
+        else:
+            channel_result["threads_data"] = []
+
+        log.info(f"Hoàn thành xử lý song song cho kênh: {channel.name}. Tổng tin kênh: {channel_result.get('message_count',0)}")
+        return channel_result
+
+
+# --- Hàm chính để quét tất cả các kênh và luồng ---
+async def scan_all_channels_and_threads(scan_data: Dict[str, Any]):
+    accessible_channels: List[Union[discord.TextChannel, discord.VoiceChannel]] = scan_data["accessible_channels"]
+    bot: commands.Bot = scan_data["bot"]
+    e = lambda name: utils.get_emoji(name, bot)
+
+    log.info(f"Bắt đầu quét song song {len(accessible_channels)} kênh (tối đa {MAX_CONCURRENT_SCANS} đồng thời)...")
+
+    last_status_update_time = scan_data["overall_start_time"]
+    update_interval_seconds = 12
+    status_message = scan_data["initial_status_msg"]
+
+    new_channel_details: List[Dict[str, Any]] = []
+    scan_data["processed_channels_count"] = 0
+    scan_data["processed_threads_count"] = 0
+    scan_data["skipped_threads_count"] = 0
+
+    channel_tasks = [
+        _process_single_channel_and_its_threads(scan_data, ch_obj)
+        for ch_obj in accessible_channels
+    ]
+
+    completed_tasks_count = 0
+    total_tasks_initial = len(channel_tasks)
+
+    for coro in asyncio.as_completed(channel_tasks):
+        try:
+            channel_result_with_threads = await coro
+            if channel_result_with_threads: # Kiểm tra None phòng trường hợp lỗi lạ
+                new_channel_details.append(channel_result_with_threads)
+                if channel_result_with_threads.get("processed"):
+                    scan_data["processed_channels_count"] += 1
+                for thread_res in channel_result_with_threads.get("threads_data", []):
+                    if thread_res.get("processed") and not thread_res.get("error"):
+                        scan_data["processed_threads_count"] += 1
+                    else:
+                        scan_data["skipped_threads_count"] += 1
+        except Exception as e_task:
+            log.error(f"Lỗi nghiêm trọng trong một tác vụ quét kênh chính: {e_task}", exc_info=True)
+            scan_data["scan_errors"].append(f"Lỗi nghiêm trọng task quét kênh: {e_task}")
+        finally:
+            completed_tasks_count += 1
+            now = discord.utils.utcnow()
+            if (now - last_status_update_time).total_seconds() > update_interval_seconds or completed_tasks_count == total_tasks_initial:
+                status_embed = _create_progress_embed(scan_data, completed_tasks_count, total_tasks_initial, now)
+                status_message = await _update_status_message(scan_data["ctx"], status_message, status_embed)
+                scan_data["status_message"] = status_message
+                last_status_update_time = now
+
+    scan_data["channel_details"] = new_channel_details
+    log.info(
+        f"Hoàn thành quét song song. "
+        f"Kênh xử lý: {scan_data['processed_channels_count']}, "
+        f"Luồng xử lý: {scan_data['processed_threads_count']}, "
+        f"Luồng bỏ qua: {scan_data['skipped_threads_count']}"
+    )
+
+
+# --- Các hàm helper cho status message và progress embed (cập nhật) ---
 async def _update_status_message(
     ctx: commands.Context,
     current_status_message: Optional[discord.Message],
     embed: discord.Embed
 ) -> Optional[discord.Message]:
-    """Gửi hoặc sửa tin nhắn trạng thái, trả về message object mới nếu cần."""
     try:
         if current_status_message:
             await current_status_message.edit(content=None, embed=embed)
@@ -653,46 +541,35 @@ async def _update_status_message(
 
 def _create_progress_embed(
     scan_data: Dict[str, Any],
-    current_channel: Union[discord.TextChannel, discord.VoiceChannel],
-    current_channel_index: int,
-    channel_message_count: int,
-    channel_scan_start_time: datetime.datetime,
+    completed_locations_count: int,
+    total_initial_channels: int, # Tổng số kênh ban đầu (không tính thread)
     now: datetime.datetime
 ) -> discord.Embed:
-    """Tạo embed hiển thị tiến trình quét."""
     bot: commands.Bot = scan_data["bot"]
     e = lambda name: utils.get_emoji(name, bot)
-    total_accessible_channels = len(scan_data["accessible_channels"])
 
-    progress_percent = ((current_channel_index - 1) / total_accessible_channels) * 100 if total_accessible_channels > 0 else 0
+    progress_percent = ((completed_locations_count) / total_initial_channels) * 100 if total_initial_channels > 0 else 0
     progress_bar = utils.create_progress_bar(progress_percent)
 
-    channel_elapsed_sec = (now - channel_scan_start_time).total_seconds()
-    messages_per_second = (channel_message_count / channel_elapsed_sec) if channel_elapsed_sec > 0.1 else 0
-
     time_so_far_sec = (now - scan_data["overall_start_time"]).total_seconds()
-    avg_time_per_channel = (time_so_far_sec / (current_channel_index - 1)) if current_channel_index > 1 else 60.0
-    estimated_remaining_sec = max(0.0, (total_accessible_channels - (current_channel_index - 1)) * avg_time_per_channel)
+    overall_msgs = scan_data.get('overall_total_message_count', 0)
+    overall_scan_speed = (overall_msgs / time_so_far_sec) if time_so_far_sec > 0.1 else 0
+
+    avg_time_per_initial_channel = (time_so_far_sec / completed_locations_count) if completed_locations_count > 0 else 60.0
+    estimated_remaining_sec = max(0.0, (total_initial_channels - completed_locations_count) * avg_time_per_initial_channel)
     estimated_completion_time = now + datetime.timedelta(seconds=estimated_remaining_sec)
 
-    channel_type_emoji = utils.get_channel_type_emoji(current_channel, bot)
     status_embed = discord.Embed(
-        title=f"{e('loading')} Đang Quét: {channel_type_emoji} #{current_channel.name}",
+        title=f"{e('loading')} Đang Quét Server...",
         description=progress_bar,
         color=discord.Color.orange(),
         timestamp=now
     )
-
-    status_embed.add_field(name="Tiến độ Kênh", value=f"{current_channel_index}/{total_accessible_channels}", inline=True)
-    status_embed.add_field(name="Tin nhắn (Kênh)", value=f"{channel_message_count:,}", inline=True)
-    status_embed.add_field(name="Tốc độ (Kênh)", value=f"~{messages_per_second:.1f} msg/s", inline=True)
-
-    overall_msgs = scan_data.get('overall_total_message_count', 0)
+    status_embed.add_field(name="Tiến độ (Kênh)", value=f"{completed_locations_count}/{total_initial_channels}", inline=True)
     status_embed.add_field(name="Tổng Tin Nhắn", value=f"{overall_msgs:,}", inline=True)
+    status_embed.add_field(name="Tốc độ (Tổng)", value=f"~{overall_scan_speed:.1f} msg/s", inline=True)
     users_detected = len(scan_data['user_activity'])
     status_embed.add_field(name="Users Phát Hiện", value=f"{users_detected:,}", inline=True)
-    status_embed.add_field(name="TG Kênh", value=utils.format_timedelta(datetime.timedelta(seconds=channel_elapsed_sec)), inline=True)
-
     status_embed.add_field(name="TG Ước Tính", value=utils.format_timedelta(datetime.timedelta(seconds=estimated_remaining_sec)), inline=True)
     status_embed.add_field(name="Dự Kiến Xong", value=utils.format_discord_time(estimated_completion_time, 'R'), inline=True)
 
@@ -700,12 +577,11 @@ def _create_progress_embed(
         filtered_reaction_count = scan_data.get("overall_total_filtered_reaction_count", 0)
         status_embed.add_field(name=f"{e('reaction')} React (Lọc)", value=f"{filtered_reaction_count:,}", inline=True)
     else:
-        status_embed.add_field(name="\u200b", value="\u200b", inline=True)
+        status_embed.add_field(name="\u200b", value="\u200b", inline=True) # Placeholder để giữ layout
 
-    footer_text = f"Quét toàn bộ | ID Kênh: {current_channel.id}"
+    footer_text = f"Quét song song | Server ID: {scan_data['server'].id}"
     if discord_logging.get_log_target_thread():
         footer_text += " | Log chi tiết trong thread"
     status_embed.set_footer(text=footer_text)
-
     return status_embed
 # --- END OF FILE cogs/deep_scan_helpers/scan_channels.py ---

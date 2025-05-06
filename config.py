@@ -11,7 +11,9 @@ log = logging.getLogger(__name__)
 
 # --- Tải biến môi trường ---
 load_dotenv()
-
+# Trong config.py, gần các hằng số khác
+MAX_CONCURRENT_CHANNEL_SCANS = int(os.getenv("MAX_CONCURRENT_CHANNEL_SCANS", "5"))
+log.info(f"Số kênh/luồng quét đồng thời tối đa: {MAX_CONCURRENT_CHANNEL_SCANS}")
 # --- Helper Function ---
 # (Giữ nguyên các hàm helper: _parse_id_list, _parse_unicode_list, _parse_id, _load_quy_toc_anh_mapping)
 def _parse_id_list(env_var_name: str) -> Set[int]:
