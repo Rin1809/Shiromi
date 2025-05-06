@@ -140,8 +140,8 @@ def _log_scan_summary(scan_data: Dict[str, Any]):
     scan_data["overall_duration"] = overall_duration # Cập nhật lại duration
 
     channel_details: List[Dict[str, Any]] = scan_data["channel_details"]
-    final_processed_channels = scan_data.get("processed_channels_count", 0) # Lấy từ scan_data
-    final_processed_threads = scan_data.get("processed_threads_count", 0) # Lấy từ scan_data
+    final_processed_channels = scan_data.get("processed_channels_count", 0) 
+    final_processed_threads = scan_data.get("processed_threads_count", 0) 
 
     # Tính lại skipped dựa trên trạng thái 'processed' cuối cùng
     final_skipped_channels_actual = sum(1 for d in channel_details if not d.get("processed"))

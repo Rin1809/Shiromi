@@ -3,7 +3,7 @@
   /* Màu sắc */
   --background-color: #1e1e2e;
   --text-color: #cdd6f4;
-  --card-background: #313244;
+  --card-background: #1e1e2e;
   --border-color: #45475a;
   --primary-color: #b387d3;
   --secondary-color: #f5c2e7;
@@ -12,23 +12,20 @@
   --loading-color: #f9e2af;
 
   /* Thời gian animation */
-  --intro-stage-fade-duration: 0.6s; /* Thời gian fade chung giữa các stage */
+  --intro-stage-fade-duration: 0.6s;
   --cat-pulse-duration: 1.5s;
-  /* ---- THỜI GIAN CHO ANIMATION "WOW" ---- */
-  --wow-total-duration: 1.0s;      /* Tổng thời gian animation WOW xuất hiện */
-  --wow-avatar-appear-duration: 0.6s; /* Thời gian avatar hiện (có bounce) */
-  --wow-text-slide-duration: 0.7s;    /* Thời gian text trượt ra */
-  --wow-avatar-move-delay: 0.15s;     /* Avatar di chuyển sau khi hiện chút */
-  --wow-text-appear-delay: 0.3s;      /* Text trượt ra sau avatar hiện */
-  --wow-move-distance: 80px;         /* Khoảng cách di chuyển tương đối */
-  --wow-hide-duration: 0.5s;         /* Thời gian animation ẩn WOW */
-  /* ------------------------------------- */
-  --content-fade-in-duration: 0.6s; /* Thời gian hiện content */
-  --search-move-duration: 0.4s;   /* Thời gian di chuyển thanh search */
-  --results-fade-duration: 0.5s;  /* Thời gian hiện kết quả */
+  --wow-total-duration: 1.0s;     
+  --wow-avatar-appear-duration: 0.6s;
+  --wow-text-slide-duration: 0.7s;   
+  --wow-avatar-move-delay: 0.15s;    
+  --wow-text-appear-delay: 0.3s;     
+  --wow-move-distance: 80px;        
+  --wow-hide-duration: 0.5s;        
+  --content-fade-in-duration: 0.6s;
+  --search-move-duration: 0.4s;  
+  --results-fade-duration: 0.5s; 
 }
 
-/* --- Cài đặt Body và App cơ bản --- */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -39,344 +36,180 @@ body {
   background-color: var(--background-color);
   color: var(--text-color);
   line-height: 1.6;
-  overflow-x: hidden; /* Ngăn scroll ngang */
+  overflow-x: hidden;
 }
 
 .App {
   max-width: 900px;
-  margin: 0 auto; /* Căn giữa */
+  margin: 0 auto;
   padding: 1rem 2rem;
-  min-height: 100vh; /* Chiếm toàn bộ chiều cao */
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
-/* --- Container chính điều khiển layout --- */
 .AppContainer {
-  flex-grow: 1; /* Chiếm không gian còn lại */
+  flex-grow: 1; 
   display: flex;
   flex-direction: column;
-  position: relative; /* Cho phép định vị absolute cho các stage intro */
-  overflow: hidden; /* Ẩn các phần animation tràn ra ngoài */
-  /* Transition cho việc thay đổi cách căn chỉnh */
-  transition: justify-content var(--search-move-duration) ease-in-out,
-              align-items var(--search-move-duration) ease-in-out;
+  position: relative; 
+  /* overflow: visible; Bỏ cái này đi, để AppContainer quản lý overflow của nó */
+  transition: padding-top var(--search-move-duration) ease-in-out; 
 }
 
-/* Các trạng thái layout */
 .AppContainer.intro-active {
-  justify-content: center; /* Căn giữa màn hình khi intro đang chạy */
+  justify-content: center; 
   align-items: center;
+  padding-top: 0;
 }
 .AppContainer.search-centered {
-  justify-content: center; /* Căn giữa khi chỉ có thanh search */
-  align-items: center;
+  justify-content: center; 
+  align-items: center; 
+  padding-top: 0; 
 }
 .AppContainer.search-top {
-  justify-content: flex-start; /* Đẩy nội dung lên trên khi đã search */
-  align-items: stretch; /* Cho phép nội dung chiếm full width */
+  justify-content: flex-start; 
+  align-items: stretch; 
+  padding-top: 3vh; 
 }
 
-/* --- CSS chung cho các Giai đoạn Intro --- */
 .intro-stage {
-  position: absolute; /* Nằm chồng lên nhau */
+  position: absolute; 
   top: 0; left: 0; right: 0; bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   padding: 2rem;
-  opacity: 0; /* Bắt đầu ẩn */
-  /* Transition chung khi chuyển stage (fade) */
+  opacity: 0; 
   transition: opacity var(--intro-stage-fade-duration) ease-in-out;
-  pointer-events: none; /* Không cho tương tác khi ẩn */
-  /* Transform sẽ được quản lý bởi animation cụ thể */
+  pointer-events: none; 
 }
+.intro-stage.visible { opacity: 1; pointer-events: auto; }
+.intro-stage.hiding { opacity: 0; pointer-events: none; }
 
-/* Trạng thái hiển thị của stage */
-.intro-stage.visible {
-  opacity: 1;
-  pointer-events: auto; /* Cho phép tương tác khi hiện */
-}
+.cat-stage { flex-direction: column; }
+.cat-icon { font-size: 4rem; display: inline-block; animation: catBob 1.2s ease-in-out infinite alternate; margin-bottom: 0.5rem; }
+.ellipsis { font-size: 2rem; font-weight: bold; display: inline-block; animation: pulsingEllipsis var(--cat-pulse-duration) ease-in-out infinite; }
+@keyframes catBob { from { transform: translateY(0px) rotate(-2deg); } to { transform: translateY(-8px) rotate(2deg); } }
+@keyframes pulsingEllipsis { 0%, 100% { opacity: 0.4; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.05); } }
 
-/* Trạng thái ẩn của stage (dùng animation thay vì transition transform) */
-.intro-stage.hiding {
-  opacity: 0; /* Trigger transition opacity */
-  pointer-events: none;
-}
+.server-stage-wow { display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 1.5rem; width: 100%; transition: opacity var(--intro-stage-fade-duration) ease-in-out; }
+.avatar-container-wow, .text-container-wow { position: relative; }
+.server-avatar-wow { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 3px solid var(--border-color); background-color: var(--card-background); display: block; opacity: 0; transform: scale(0.7) rotate(-10deg); }
+.server-name-wow { color: var(--secondary-color); font-size: 2.2em; font-weight: 600; margin: 0; white-space: nowrap; opacity: 0; transform: translateX(-40px) scale(0.8); clip-path: inset(0 100% 0 0); }
+.server-stage-wow.visible .server-avatar-wow { animation: wowAvatarAppearBounce var(--wow-avatar-appear-duration) cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards, wowAvatarSlideLeft var(--wow-total-duration) ease-in-out forwards var(--wow-avatar-move-delay); }
+.server-stage-wow.visible .server-name-wow { animation: wowTextSlideOut var(--wow-text-slide-duration) ease-out forwards var(--wow-text-appear-delay); }
+.server-stage-wow.hiding .server-avatar-wow { animation: wowAvatarSlideCenter var(--wow-hide-duration) ease-in forwards; }
+.server-stage-wow.hiding .server-name-wow { animation: wowTextSlideIn var(--wow-hide-duration) ease-in forwards; }
+@keyframes wowAvatarAppearBounce { 0% { opacity: 0; transform: scale(0.7) rotate(-10deg); } 60% { opacity: 1; transform: scale(1.1) rotate(5deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
+@keyframes wowAvatarSlideLeft { from { transform: translateX(0) scale(1); } to   { transform: translateX(calc(-1 * var(--wow-move-distance) / 2)) scale(1); } }
+@keyframes wowTextSlideOut { from { opacity: 0; transform: translateX(-40px) scale(0.8); clip-path: inset(0 100% 0 0); } 30% { opacity: 0.5; clip-path: inset(0 80% 0 0); } 100% { opacity: 1; transform: translateX(calc(var(--wow-move-distance) / 2)) scale(1); clip-path: inset(0 0 0 0); } }
+@keyframes wowAvatarSlideCenter { from { opacity: 1; transform: translateX(calc(-1 * var(--wow-move-distance) / 2)) scale(1); } to { opacity: 0; transform: translateX(0) scale(0.8); } }
+@keyframes wowTextSlideIn { from { opacity: 1; transform: translateX(calc(var(--wow-move-distance) / 2)) scale(1); clip-path: inset(0 0 0 0); } 70% { opacity: 0.5; clip-path: inset(0 80% 0 0); } to { opacity: 0; transform: translateX(-40px) scale(0.8); clip-path: inset(0 100% 0 0); } }
 
-/* --- Stage 1: Cat --- */
-.cat-stage {
-  flex-direction: column; /* Cần thiết cho layout mèo và dấu ... */
-}
-.cat-icon {
-  font-size: 4rem;
-  display: inline-block;
-  animation: catBob 1.2s ease-in-out infinite alternate;
-  margin-bottom: 0.5rem;
-}
-.ellipsis {
-  font-size: 2rem;
-  font-weight: bold;
-  display: inline-block;
-  animation: pulsingEllipsis var(--cat-pulse-duration) ease-in-out infinite;
-}
-
-@keyframes catBob {
-  from { transform: translateY(0px) rotate(-2deg); }
-  to { transform: translateY(-8px) rotate(2deg); }
-}
-@keyframes pulsingEllipsis {
-  0%, 100% { opacity: 0.4; transform: scale(0.95); }
-  50% { opacity: 1; transform: scale(1.05); }
-}
-
-/* --- Stage 2: Server Name ("WOW" Animation) --- */
-.server-stage-wow {
-  display: flex;
-  flex-direction: row; /* Sắp xếp avatar và text theo hàng ngang */
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem; /* Khoảng cách cuối cùng */
-  width: 100%; /* Đảm bảo chiếm đủ không gian */
-  /* Transition opacity dùng chung, transform sẽ do animation quản lý */
-  transition: opacity var(--intro-stage-fade-duration) ease-in-out;
-}
-
-/* Container riêng cho avatar và text để dễ animation */
-.avatar-container-wow,
-.text-container-wow {
-  position: relative; /* Cho phép định vị con */
-}
-
-.server-avatar-wow {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 3px solid var(--border-color);
-  background-color: var(--card-background);
-  display: block;
-  /* Trạng thái ban đầu (quan trọng cho cả xuất hiện và ẩn) */
-  opacity: 0;
-  transform: scale(0.7) rotate(-10deg);
-}
-
-.server-name-wow {
-  color: var(--secondary-color);
-  font-size: 2.2em;
-  font-weight: 600;
-  margin: 0;
-  white-space: nowrap;
-  /* Trạng thái ban đầu */
-  opacity: 0;
-  transform: translateX(-40px) scale(0.8);
-  clip-path: inset(0 100% 0 0); /* Bắt đầu bị che từ bên phải */
-}
-
-/* Kích hoạt ANIMATION XUẤT HIỆN khi stage '.visible' */
-.server-stage-wow.visible .server-avatar-wow {
-  animation: wowAvatarAppearBounce var(--wow-avatar-appear-duration) cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards,
-             wowAvatarSlideLeft var(--wow-total-duration) ease-in-out forwards var(--wow-avatar-move-delay);
-}
-
-.server-stage-wow.visible .server-name-wow {
-  animation: wowTextSlideOut var(--wow-text-slide-duration) ease-out forwards var(--wow-text-appear-delay);
-}
-
-/* Kích hoạt ANIMATION KẾT THÚC (ẨN) khi stage '.hiding' */
-.server-stage-wow.hiding .server-avatar-wow {
-  animation: wowAvatarSlideCenter var(--wow-hide-duration) ease-in forwards;
-}
-
-.server-stage-wow.hiding .server-name-wow {
-  animation: wowTextSlideIn var(--wow-hide-duration) ease-in forwards;
-}
-
-/* --- Keyframes cho Animation WOW --- */
-
-/* Avatar Xuất hiện (có nảy) */
-@keyframes wowAvatarAppearBounce {
-  0% { opacity: 0; transform: scale(0.7) rotate(-10deg); }
-  60% { opacity: 1; transform: scale(1.1) rotate(5deg); }
-  100% { opacity: 1; transform: scale(1) rotate(0deg); }
-}
-
-/* Avatar Di Chuyển Sang Trái */
-@keyframes wowAvatarSlideLeft {
-  from { transform: translateX(0) scale(1); }
-  to   { transform: translateX(calc(-1 * var(--wow-move-distance) / 2)) scale(1); }
-}
-
-/* Text Trượt Ra */
-@keyframes wowTextSlideOut {
-  from {
-    opacity: 0;
-    transform: translateX(-40px) scale(0.8);
-    clip-path: inset(0 100% 0 0);
-  }
-  30% {
-    opacity: 0.5;
-    clip-path: inset(0 80% 0 0);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(calc(var(--wow-move-distance) / 2)) scale(1);
-    clip-path: inset(0 0 0 0);
-  }
-}
-
-/* Avatar Trượt Vào Giữa và Fade Out */
-@keyframes wowAvatarSlideCenter {
-  from {
-    opacity: 1; /* Bắt đầu nhìn thấy */
-    transform: translateX(calc(-1 * var(--wow-move-distance) / 2)) scale(1);
-  }
-  to {
-    opacity: 0; /* Mờ dần */
-    transform: translateX(0) scale(0.8); /* Về giữa và nhỏ lại */
-  }
-}
-
-/* Text Trượt Vào và Fade Out */
-@keyframes wowTextSlideIn {
-  from {
-    opacity: 1;
-    transform: translateX(calc(var(--wow-move-distance) / 2)) scale(1);
-    clip-path: inset(0 0 0 0);
-  }
-  70% {
-    opacity: 0.5;
-    clip-path: inset(0 80% 0 0); /* Bắt đầu bị che */
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-40px) scale(0.8); /* Về gần vị trí avatar ban đầu */
-    clip-path: inset(0 100% 0 0); /* Bị che hoàn toàn */
-  }
-}
-
-
-/* --- Nội Dung Chính (Search + Results) --- */
 .main-content {
   width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center; /* Căn giữa nội dung ban đầu */
+  /* align-items: center; Xóa bỏ, để search-interaction-area và results-display-area tự xử lý */
   opacity: 0;
   transform: translateY(20px);
   transition: opacity var(--content-fade-in-duration) ease-out,
               transform var(--content-fade-in-duration) ease-out;
-  pointer-events: none; /* Không tương tác khi ẩn */
+  pointer-events: none; 
 }
 .main-content.visible {
   opacity: 1;
   transform: translateY(0);
-  pointer-events: auto; /* Cho phép tương tác khi hiện */
+  pointer-events: auto; 
 }
-/* Khi thanh search lên top, cho phép content chiếm full width */
+
 .AppContainer.search-top .main-content {
-     align-items: stretch;
+  /* padding-top đã được AppContainer xử lý */
 }
 
-/* --- Loading, Error, ScanInfo, Results (Animation cơ bản) --- */
-.loading {
-  color: var(--loading-color);
-  text-align: center;
-  margin-top: 1.5rem;
-  font-style: italic;
-  font-size: 1.1em;
-  opacity: 0;
-  animation: simpleFadeIn 0.5s ease forwards;
-  animation-delay: 0.2s; /* Hiện sau khi content hiện */
-}
-
-.error {
-  color: var(--error-color);
-  text-align: center;
-  margin-top: 1rem;
-  background-color: rgba(243, 139, 168, 0.1);
-  padding: 0.75rem 1rem;
-  border-radius: 5px;
-  border-left: 4px solid var(--error-color);
-  width: 90%;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-  opacity: 0;
-  animation: simpleFadeIn 0.5s ease forwards;
-}
-
-.scan-info {
-  text-align: center;
-  font-size: 0.9em;
-  color: #a6adc8;
-  margin-top: 0.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.results-container {
-  margin-top: 2rem;
-  display: grid;
-  gap: 1.5rem;
-  width: 100%;
-  /* Animation cho từng card sẽ được xử lý bởi UserInfoDisplay.css */
-}
-
-@keyframes simpleFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* --- Trang Home và Not Found --- */
-.home-page, .not-found-page {
-  text-align: center;
-  padding: 2rem;
-  margin-top: 3rem; /* Đẩy xuống một chút */
-  flex-grow: 1; /* Đảm bảo chiếm không gian nếu là trang duy nhất */
+/* Wrapper cho SearchBar, nút ShowAll và SuggestionList */
+.search-interaction-area {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-.home-page h1, .not-found-page h2 {
-   color: var(--primary-color);
-   margin-bottom: 1rem;
-   font-size: 2em;
-}
- .home-page code {
-   background-color: var(--card-background);
-   padding: 0.2em 0.4em;
-   border-radius: 3px;
-   font-family: monospace;
- }
-
-/* --- Footer --- */
-footer {
-  text-align: center;
-  margin-top: auto; /* Đẩy footer xuống cuối cùng */
-  padding: 1rem 0; /* Thêm padding trên dưới */
-  border-top: 1px solid var(--border-color);
-  font-size: 0.85em;
-  color: #a6adc8;
+  align-items: center; 
   width: 100%;
+  max-width: 550px; /* Giữ cho cụm này không quá rộng */
+  position: relative; /* QUAN TRỌNG: Để UserSuggestionList định vị */
+  margin-left: auto; /* Căn giữa chính nó trong .main-content */
+  margin-right: auto; /* Căn giữa chính nó trong .main-content */
+  /* margin-bottom: 1.5rem; Sẽ được quản lý bởi results-display-area */
 }
 
-/* --- Responsive --- */
+/* Nút Hiển Thị Tất Cả / Ẩn (Toggle Button) */
+.show-all-toggle-button {
+  background-color: transparent;
+  border: 1px solid var(--border-color); 
+  color: var(--text-color); 
+  padding: 0.3rem; 
+  width: 38px; 
+  height: 38px;
+  border-radius: 50%; 
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.15s ease, border-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.8rem; 
+  opacity: 0;
+  animation: fadeInDelayed 0.5s ease forwards 0.3s;
+}
+.show-all-toggle-button:hover:not(:disabled) { background-color: rgba(137, 180, 250, 0.1); border-color: var(--primary-color); color: var(--primary-color); }
+.show-all-toggle-button.active { background-color: rgba(137, 180, 250, 0.2); border-color: var(--primary-color); color: var(--primary-color); }
+.show-all-toggle-button:active:not(:disabled) { transform: scale(0.95); }
+.show-all-toggle-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@keyframes fadeInDelayed { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Area chứa các kết quả, loading, error */
+.results-display-area {
+    width: 100%; 
+    display: flex;
+    flex-direction: column;
+    align-items: center; 
+    margin-top: 1.5rem; /* Khoảng cách với search-interaction-area */
+}
+
+.loading { color: var(--loading-color); text-align: center; font-style: italic; font-size: 1.1em; opacity: 0; animation: simpleFadeIn 0.5s ease forwards; }
+.error { color: var(--error-color); text-align: center; background-color: rgba(243, 139, 168, 0.1); padding: 0.75rem 1rem; border-radius: 5px; border-left: 4px solid var(--error-color); width: 90%; max-width: 600px; margin-left: auto; margin-right: auto; opacity: 0; animation: simpleFadeIn 0.5s ease forwards; }
+.scan-info { text-align: center; font-size: 0.9em; color: #a6adc8; margin-bottom: 1.2rem; }
+.results-container { display: grid; gap: 1.5rem; width: 100%; }
+@keyframes simpleFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.home-page, .not-found-page { text-align: center; padding: 2rem; margin-top: 3rem; flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.home-page h1, .not-found-page h2 { color: var(--primary-color); margin-bottom: 1rem; font-size: 2em; }
+.home-page code { background-color: var(--card-background); padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
+
+footer { text-align: center; margin-top: auto; padding: 1rem 0; border-top: 1px solid var(--border-color); font-size: 0.85em; color: #a6adc8; width: 100%; }
+
 @media (max-width: 768px) {
   .App { padding: 1rem; }
   .cat-icon { font-size: 3rem; }
   .ellipsis { font-size: 1.5rem; }
-  /* Điều chỉnh WOW animation trên mobile */
-  :root {
-    --wow-move-distance: 60px; /* Giảm khoảng cách di chuyển */
-  }
+  :root { --wow-move-distance: 60px; }
   .server-avatar-wow { width: 80px; height: 80px; }
   .server-name-wow { font-size: 1.8em; }
-  .server-stage-wow { gap: 1rem; /* Giảm gap */ }
-  /* -------------------------------- */
+  .server-stage-wow { gap: 1rem; }
   .home-page h1, .not-found-page h2 { font-size: 1.7em; }
   .error { width: 100%; }
   footer { margin-top: 2rem; }
+  .show-all-toggle-button { padding: 0.25rem; width: 36px; height: 36px; }
+  .results-display-area { margin-top: 1rem; }
 }
-/* --- END OF FILE website/client/src/styles/App.css --- */
+
+.loading-users-list {
+  color: var(--loading-color);
+  text-align: center;
+  font-style: italic;
+  font-size: 0.9em; /* Nhỏ hơn loading chính */
+  margin-top: 0.5rem; /* Khoảng cách với nút toggle */
+  width: 100%;
+  max-width: 550px; /* Giống SearchBar */
+}
+/* --- END OF FILE website/client/src/components/styles/App.css --- */

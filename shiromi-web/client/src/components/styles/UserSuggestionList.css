@@ -1,0 +1,92 @@
+/* --- START OF FILE website/client/src/components/styles/UserSuggestionList.css --- */
+.user-suggestions-container {
+    position: absolute; 
+    top: calc(100% + 8px); 
+    left: 0;
+    right: 0; 
+    width: 100%; 
+    max-width: 550px; 
+    background-color: #1e1e2e; 
+    border: 1px solid #1e1e2e; 
+    border-top: none; 
+    border-radius: 0 0 12px 12px; 
+    margin-top: -1px; 
+    max-height: 350px; 
+    overflow-y: auto;
+    z-index: 10; 
+    animation: slideDownFadeInUserList 0.3s ease-out forwards;
+  
+    /* ===== Scrollbar CSS ===== */
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary-color) var(--card-background); /* thumb track */
+  
+    /* Chrome, Edge, and Safari */
+    &::-webkit-scrollbar {
+      width: 8px; /* Chiều rộng thanh cuộn */
+    }
+  
+    &::-webkit-scrollbar-track {
+      background: rgba(49, 50, 68, 0.5); /* Màu nền track, hơi tối hơn card-background */
+      border-radius: 10px;
+    }
+  
+    &::-webkit-scrollbar-thumb {
+      background-color: var(--primary-color); /* Màu của thumb (con trượt) */
+      border-radius: 10px;
+      border: 2px solid transparent; /* Tạo khoảng cách giữa thumb và track */
+      background-clip: content-box; /* Quan trọng để border không bị đè màu */
+    }
+  
+    &::-webkit-scrollbar-thumb:hover {
+      background-color: var(--secondary-color); /* Màu thumb khi hover */
+    }
+  }
+  
+  .suggestion-item {
+    display: flex;
+    align-items: center;
+    padding: 0.6rem 1rem; 
+    cursor: pointer;
+    border-bottom: 1px solid rgba(205, 214, 244, 0.15); 
+    transition: background-color 0.15s ease;
+  }
+  
+  .suggestion-item:last-child {
+    border-bottom: none;
+  }
+  
+  .suggestion-item:hover,
+  .suggestion-item:focus {
+    background-color: rgba(137, 180, 250, 0.15); 
+    outline: none;
+  }
+  
+  .suggestion-avatar {
+    width: 32px; 
+    height: 32px;
+    border-radius: 50%;
+    margin-right: 0.85rem;
+    object-fit: cover;
+    background-color: rgba(255, 255, 255, 0.05); 
+  }
+  
+  .suggestion-name {
+    font-size: 0.95em; 
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  @keyframes slideDownFadeInUserList {
+    from {
+      opacity: 0;
+      transform: translateY(-10px); 
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* --- END OF FILE website/client/src/components/styles/UserSuggestionList.css --- */

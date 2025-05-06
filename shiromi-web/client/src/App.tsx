@@ -1,14 +1,16 @@
 // --- START OF FILE website/client/src/App.tsx ---
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Routes, Route, useParams } from 'react-router-dom'; 
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Routes, Route, useParams } from 'react-router-dom';
 import SearchBar from './components/SearchBar';
 import UserInfoDisplay from './components/UserInfoDisplay';
+import UserSuggestionList from './components/UserSuggestionList';
 import './components/styles/App.css';
 
 // Interface UserScanResult
 interface UserScanResult {
   user_id: string;
   display_name_at_scan: string;
+  avatar_url_at_scan?: string | null;
   is_bot: boolean;
   message_count?: number;
   reaction_received_count?: number;
@@ -30,17 +32,32 @@ interface UserScanResult {
 
 type IntroStage = 'cat' | 'serverName' | 'search';
 
+const ArrowDownIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+    <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+  </svg>
+);
+const ArrowUpIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+      <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6 1.41 1.41z"/>
+    </svg>
+  );
+
 function ScanPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<UserScanResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Loading này chỉ cho tìm kiếm cụ thể
+  const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false); // Loading riêng cho fetch all users
   const [error, setError] = useState<string | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const { guildId } = useParams<{ guildId: string }>();
   const [guildName, setGuildName] = useState<string | null>(null);
   const [introStage, setIntroStage] = useState<IntroStage>('cat');
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasDisplayedResults, setHasDisplayedResults] = useState(false); 
+  
+  const [allUsersList, setAllUsersList] = useState<UserScanResult[]>([]);
+  const [isShowingAllUsersList, setIsShowingAllUsersList] = useState(false);
 
   useEffect(() => {
     if (!guildId) {
@@ -53,10 +70,12 @@ function ScanPage() {
     setGuildName("Hôm qua ᓚᘏᗢ | きのう");
     setIntroStage('cat');
     setIsFadingOut(false);
-    setHasSearched(false);
+    setHasDisplayedResults(false);
     setSearchResults([]);
+    setAllUsersList([]);
     setSearchTerm('');
     setScanId(null);
+    setIsShowingAllUsersList(false);
     
     let stage1Timer: number | null = null; 
     let stage2Timer: number | null = null; 
@@ -80,36 +99,123 @@ function ScanPage() {
     }
   }, [guildId]);
 
-  const handleSearch = useCallback(async () => {
-    if (!guildId || searchTerm.length < 2) {
-      setError('Vui lòng nhập ít nhất 2 ký tự để bắt đầu tìm kiếm.');
-      setSearchResults([]);
+  const performFetch = useCallback(async (isSearchAll = false) => {
+    if (!guildId) {
+      setError('Lỗi: Không thể xác định ID Guild.');
       return;
     }
-    setIsLoading(true);
+    if (!isSearchAll && searchTerm.trim().length < 2) {
+      setError('Vui lòng nhập ít nhất 2 ký tự để bắt đầu tìm kiếm.');
+      setSearchResults([]); 
+      setHasDisplayedResults(false);
+      return;
+    }
+
+    if (isSearchAll) {
+        setIsLoadingAllUsers(true); // Sử dụng state loading riêng
+    } else {
+        setIsLoading(true); // Loading cho tìm kiếm cụ thể
+    }
     setError(null);
-    setSearchResults([]);
-    setHasSearched(true);
+    
+    if (!isSearchAll) {
+        setSearchResults([]);
+    }
+
     try {
-      const response = await fetch(`/api/scan/${guildId}/user?search=${encodeURIComponent(searchTerm)}`);
+      let apiUrl = `/api/scan/${guildId}/user?`;
+      if (isSearchAll) {
+        apiUrl += `showall=true`;
+      } else {
+        apiUrl += `search=${encodeURIComponent(searchTerm.trim())}`;
+      }
+
+      const response = await fetch(apiUrl);
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: `Lỗi HTTP ${response.status}` }));
         throw new Error(errorData.error || `Lỗi ${response.status}`);
       }
       const data = await response.json();
-      setSearchResults(data.users || []);
       setScanId(data.scan_id || null);
-      if (!data.users || data.users.length === 0) {
-        setError(`Không tìm thấy người dùng nào khớp với '${searchTerm}'.`);
+
+      if (isSearchAll) {
+        setAllUsersList(data.users || []);
+        if (!data.users || data.users.length === 0) {
+          setError('Không tìm thấy người dùng nào (không phải bot) trong lần quét này.');
+        }
+      } else {
+        setSearchResults(data.users || []);
+        if (!data.users || data.users.length === 0) {
+          setError(`Không tìm thấy người dùng nào khớp với '${searchTerm}'.`);
+          setHasDisplayedResults(false);
+        } else {
+          setHasDisplayedResults(true); 
+        }
       }
     } catch (err: any) {
-      console.error("API Search Error:", err);
-      setError(err.message || 'Đã xảy ra lỗi không mong muốn khi tìm kiếm.');
-      setSearchResults([]);
+      console.error("API Error:", err);
+      setError(err.message || 'Đã xảy ra lỗi không mong muốn.');
+      if (isSearchAll) setAllUsersList([]); else setSearchResults([]);
+      if (!isSearchAll) setHasDisplayedResults(false); 
     } finally {
-      setIsLoading(false);
+        if (isSearchAll) {
+            setIsLoadingAllUsers(false);
+        } else {
+            setIsLoading(false);
+        }
     }
   }, [guildId, searchTerm]);
+
+
+  const handleSearchClick = () => {
+    setIsShowingAllUsersList(false); 
+    setAllUsersList([]);
+    setHasDisplayedResults(false); 
+    performFetch(false);
+  };
+
+  const handleToggleShowAllClick = async () => {
+    if (isShowingAllUsersList) {
+      setIsShowingAllUsersList(false);
+      // Không cần xóa allUsersList ngay, để nếu người dùng mở lại thì có sẵn
+    } else {
+      setSearchTerm(''); 
+      setSearchResults([]); 
+      setHasDisplayedResults(false); 
+      
+      // Chỉ fetch nếu allUsersList rỗng
+      if (allUsersList.length === 0) {
+        await performFetch(true); 
+      }
+      setIsShowingAllUsersList(true);
+    }
+  };
+  
+  const handleUserSuggestionSelect = (userNameOrId: string) => {
+    setSearchTerm(userNameOrId);
+    setIsShowingAllUsersList(false); 
+    // Không cần xóa allUsersList
+    setHasDisplayedResults(false); 
+    
+    setTimeout(() => {
+        const searchInput = document.querySelector('.search-bar-container input') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+        performFetch(false); 
+    }, 0);
+  };
+
+  const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newSearchTerm = event.target.value;
+    setSearchTerm(newSearchTerm);
+    if (isShowingAllUsersList && newSearchTerm.trim() !== '') {
+      setIsShowingAllUsersList(false); 
+      // Không cần xóa allUsersList
+    }
+     if (newSearchTerm.trim() === '' && searchResults.length > 0) {
+        setSearchResults([]); 
+        setHasDisplayedResults(false); 
+    }
+  };
 
    const formatRelativeTime = (isoString?: string): string => {
     if (!isoString) return 'N/A';
@@ -146,9 +252,11 @@ function ScanPage() {
 
   const appContainerClass = useMemo(() => {
     if (introStage !== 'search') return "AppContainer intro-active";
-    if (hasSearched) return "AppContainer search-top";
+    if (hasDisplayedResults && searchResults.length > 0) {
+        return "AppContainer search-top";
+    }
     return "AppContainer search-centered";
-  }, [introStage, hasSearched]);
+  }, [introStage, hasDisplayedResults, searchResults.length]);
 
   return (
     <div className={appContainerClass}>
@@ -160,9 +268,7 @@ function ScanPage() {
       )}
 
       {introStage === 'serverName' && (
-         // Container này sẽ style khác đi trong CSS
         <div className={`intro-stage server-stage-wow ${isFadingOut ? 'hiding' : 'visible'}`}>
-            {/* Đặt avatar và text vào các div riêng để dễ điều khiển animation */}
             <div className="avatar-container-wow">
                 <img
                     src="https://cdn.discordapp.com/icons/1259368902937280593/81ce19857ca473711292dfa495e3c90d.webp?size=128&quality=lossless"
@@ -177,27 +283,56 @@ function ScanPage() {
       )}
 
       <div className={`main-content ${introStage === 'search' ? 'visible' : ''}`}>
-          <SearchBar
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onSearch={handleSearch}
-            isLoading={isLoading}
-          />
-          {isLoading && <p className="loading">Đang tìm kiếm...</p>}
-          {error && <p className="error">{error}</p>}
-          {scanId && searchResults.length > 0 && (
-            <p className="scan-info">ID trích từ Database là: {scanId}</p>
-          )}
-          <div className="results-container">
-            {searchResults.map((user, index) => (
-              <UserInfoDisplay
-                key={user.user_id}
-                user={user}
-                formatRelativeTime={formatRelativeTime}
-                formatTimeDelta={formatTimeDelta}
-                style={{ animationDelay: `${index * 0.1}s` }}
+          <div className="search-interaction-area">
+            <SearchBar
+              value={searchTerm}
+              onChange={handleSearchInputChange}
+              onSearch={handleSearchClick}
+              isLoading={isLoading} // Chỉ dùng isLoading cho SearchBar
+            />
+            
+            {introStage === 'search' && ( 
+              <button
+                onClick={handleToggleShowAllClick}
+                className={`show-all-toggle-button ${isShowingAllUsersList ? 'active' : ''}`}
+                disabled={isLoading || isLoadingAllUsers} // Disable nếu có loading bất kỳ
+                title={isShowingAllUsersList ? "Ẩn danh sách" : "Hiển thị tất cả người dùng (không phải bot)"}
+              >
+                {isShowingAllUsersList ? <ArrowUpIcon /> : <ArrowDownIcon />}
+              </button>
+            )}
+
+            {isLoadingAllUsers && isShowingAllUsersList && (
+              <p className="loading-users-list">Đang tải danh sách người dùng...</p>
+            )}
+            {isShowingAllUsersList && allUsersList.length > 0 && !isLoadingAllUsers && (
+              <UserSuggestionList
+                users={allUsersList}
+                onUserSelect={handleUserSuggestionSelect}
               />
-            ))}
+            )}
+          </div>
+          
+          <div className="results-display-area">
+            {isLoading && <p className="loading">Đang tìm kiếm...</p>} {/* Chỉ hiển thị khi tìm kiếm cụ thể */}
+            {error && <p className="error">{error}</p>}
+            
+            {scanId && searchResults.length > 0 && ( 
+              <p className="scan-info">
+                ID trích từ Database là: {scanId}
+              </p>
+            )}
+            <div className="results-container">
+              {searchResults.map((user, index) => (
+                <UserInfoDisplay
+                  key={user.user_id}
+                  user={user}
+                  formatRelativeTime={formatRelativeTime}
+                  formatTimeDelta={formatTimeDelta}
+                  style={{ animationDelay: `${index * 0.05}s` }}
+                />
+              ))}
+            </div>
           </div>
       </div>
     </div>

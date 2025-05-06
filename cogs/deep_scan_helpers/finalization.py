@@ -18,7 +18,7 @@ async def finalize_scan(scan_data: Dict[str, Any]):
     server: discord.Guild = scan_data["server"]
     e = lambda name: utils.get_emoji(name, bot)
     scan_errors: List[str] = scan_data["scan_errors"]
-    scan_id: Optional[int] = scan_data.get("scan_id") # Lấy scan_id
+    scan_id: Optional[int] = scan_data.get("scan_id") 
 
     log.info(f"{e('loading')} Đang hoàn tất quét log và chuẩn bị gửi báo cáo...")
 
@@ -46,11 +46,6 @@ async def finalize_scan(scan_data: Dict[str, Any]):
     if config.WEBSITE_BASE_URL and config.WEBSITE_BASE_URL != "http://localhost:3000":
         # Ưu tiên link chỉ có guild ID để web tự lấy scan mới nhất
         website_link = f"{config.WEBSITE_BASE_URL}/scan/{server.id}"
-        # Hoặc link có cả scan_id nếu web yêu cầu:
-        # if scan_id:
-        #     website_link = f"{config.WEBSITE_BASE_URL}/scan/{server.id}/{scan_id}"
-        # else:
-        #     website_link = f"{config.WEBSITE_BASE_URL}/scan/{server.id}" # Fallback chỉ guild
     else:
         log.warning("WEBSITE_BASE_URL chưa được cấu hình đúng, link tra cứu sẽ không hoạt động.")
 
@@ -58,8 +53,9 @@ async def finalize_scan(scan_data: Dict[str, Any]):
     intermediate_message_lines = [
         f"# Là {config.BOT_NAME} đây <:a_eneuroAYAYA:1367434562245890048> !! \n",
         "## ℹ️ Đã thu thập xong log !!",
-        "## 📄 Đã viết xong báo cáo !!\n",
-        f"🔍 Tra cứu kết quả của mấy bạn khác tại: <[Bấm vô đây: Hôm qua ᓚᘏᗢ | きのう]({website_link})>\n", # <<< THÊM LINK WEB
+        "## 📄 Đã viết xong báo cáo !! \n\n",
+        f"🔍 Tra cứu kết quả của mấy bạn khác tại: \n\n"
+        f"## [Bấm vô đây: Hôm qua ᓚᘏᗢ | きのう]({website_link}) \n\n", # <<< THÊM LINK WEB
         f"👉 Ghé qua {report_channel_mention} để xem báo cáo tổng hợp của Server trong 1 năm qua trên Discord nhe!"
     ]
     intermediate_message = "\n".join(intermediate_message_lines)
