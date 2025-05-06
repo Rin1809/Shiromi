@@ -1,0 +1,103 @@
+/* --- START OF FILE website/client/src/styles/UserInfoDisplay.css --- */
+.user-info-card {
+    background-color: var(--card-background);
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    opacity: 0; /* Bắt đầu ẩn */
+    transform: translateY(15px); /* Hơi đẩy xuống */
+  }
+
+  /* Class để kích hoạt animation */
+  .user-info-card.appear {
+      animation: fadeInUp var(--results-fade-duration) ease-out forwards;
+      /* animation-delay được set inline trong App.tsx */
+  }
+
+  /* Bỏ hiệu ứng hover mặc định nếu muốn */
+  /* .user-info-card:hover {
+      transform: translateY(0);
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  } */
+
+
+  .user-info-card h2 {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    color: var(--secondary-color);
+    border-bottom: 1px dashed var(--border-color);
+    padding-bottom: 0.75rem;
+    font-size: 1.5em;
+  }
+
+  .info-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .info-section:last-child {
+      margin-bottom: 0;
+  }
+
+  .info-section h3 {
+    font-size: 1.1em;
+    color: var(--primary-color);
+    margin-bottom: 0.75rem;
+    border-left: 3px solid var(--primary-color);
+    padding-left: 0.5rem;
+  }
+
+  .info-section p,
+  .info-section li {
+    margin-bottom: 0.5rem;
+    color: var(--text-color);
+    font-size: 0.95em;
+  }
+
+  .info-section p strong,
+  .info-section li strong {
+      color: var(--success-color);
+      font-weight: 600;
+  }
+
+  .info-section ul {
+      list-style: none;
+      padding-left: 0.5rem;
+  }
+
+  /* Style cho rank */
+  .info-section p strong + span {
+      font-size: 0.85em;
+      color: #a6adc8;
+      margin-left: 0.4em;
+      font-style: italic;
+  }
+
+/* Keyframes cho animation xuất hiện kết quả */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(15px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+
+  /* Responsive */
+  @media (max-width: 600px) {
+      .user-info-card {
+          padding: 1rem;
+      }
+      .user-info-card h2 {
+          font-size: 1.3em;
+      }
+      .info-section h3 {
+          font-size: 1em;
+      }
+  }
+
+  /* --- END OF FILE website/client/src/styles/UserInfoDisplay.css --- */

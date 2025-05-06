@@ -89,7 +89,7 @@ async def setup_tables():
     log.info("Đang kiểm tra/tạo bảng cơ sở dữ liệu...")
     try:
         async with pool.acquire() as conn:
-            # Bảng cache Audit Log
+            # --- BẢNG AUDIT LOG ---
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log_cache (
                     log_id BIGINT PRIMARY KEY,
@@ -99,18 +99,15 @@ async def setup_tables():
                     action_type TEXT NOT NULL,
                     reason TEXT,
                     created_at TIMESTAMPTZ NOT NULL,
-                    extra_data JSONB -- <<< Đảm bảo là JSONB để hiệu quả hơn
+                    extra_data JSONB
                 );
             """)
-            # Index cho audit_log_cache
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_guild_time ON audit_log_cache (guild_id, created_at DESC);")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_action_type ON audit_log_cache (guild_id, action_type);")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_target_id ON audit_log_cache (target_id);")
-            # <<< FIX: Thêm index cho user_id và created_at để truy vấn log của user nhanh hơn nếu cần >>>
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_time ON audit_log_cache (user_id, created_at DESC);")
-            # <<< END FIX >>>
 
-            # Bảng metadata của Guild
+            # --- BẢNG METADATA GUILD ---
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS guild_metadata (
                     guild_id BIGINT PRIMARY KEY,
@@ -118,16 +115,64 @@ async def setup_tables():
                     last_audit_scan_time TIMESTAMPTZ
                 );
             """)
+
+            # --- BẢNG SCANS ---
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS scans (
+                    scan_id BIGSERIAL PRIMARY KEY,
+                    guild_id BIGINT NOT NULL,
+                    requested_by_user_id BIGINT,
+                    start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    end_time TIMESTAMPTZ,
+                    status VARCHAR(20) NOT NULL DEFAULT 'running', -- 'running', 'completed', 'failed'
+                    website_accessible BOOLEAN DEFAULT FALSE,
+                    error_message TEXT
+                );
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_guild_status_end ON scans (guild_id, status, website_accessible, end_time DESC);")
+
+            # --- BẢNG USER SCAN RESULTS ---
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_scan_results (
+                    result_id BIGSERIAL PRIMARY KEY,
+                    scan_id BIGINT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    display_name_at_scan VARCHAR(100),
+                    is_bot BOOLEAN,
+                    message_count INTEGER DEFAULT 0,
+                    reaction_received_count INTEGER DEFAULT 0,
+                    reaction_given_count INTEGER DEFAULT 0,
+                    reply_count INTEGER DEFAULT 0,
+                    mention_given_count INTEGER DEFAULT 0,
+                    mention_received_count INTEGER DEFAULT 0,
+                    link_count INTEGER DEFAULT 0,
+                    image_count INTEGER DEFAULT 0,
+                    sticker_count INTEGER DEFAULT 0,
+                    other_file_count INTEGER DEFAULT 0,
+                    distinct_channels_count INTEGER DEFAULT 0,
+                    first_seen_utc TIMESTAMPTZ,
+                    last_seen_utc TIMESTAMPTZ,
+                    activity_span_seconds FLOAT,
+                    ranking_data JSONB,
+                    achievement_data JSONB,
+                    raw_dm_embed_data JSONB, -- Tùy chọn
+                    UNIQUE (scan_id, user_id)
+                );
+            """)
+            # Tạo index riêng biệt
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scan_results_scan_user ON user_scan_results (scan_id, user_id);")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scan_results_scan_name ON user_scan_results (scan_id, display_name_at_scan);")
+
             log.info("Kiểm tra/Tạo bảng cơ sở dữ liệu thành công.")
     except Exception as e:
         log.error(f"Lỗi khi thiết lập bảng cơ sở dữ liệu: {e}", exc_info=True)
+        raise e
 
-# <<< FIX: Rà soát và cải thiện _serialize_value và _serialize_changes >>>
+
+# --- Các hàm Serialize (Giữ nguyên từ trước) ---
 def _serialize_value(value: Any) -> Any:
-    """Serialize các giá trị riêng lẻ trong AuditLogChanges một cách an toàn cho JSON."""
     if isinstance(value, (str, int, bool, float)) or value is None:
         return value
-    # <<< FIX: Đảm bảo ID luôn là string để nhất quán JSON >>>
     elif isinstance(value, discord.Role):
         return {'id': str(value.id), 'name': value.name, 'type': 'role'}
     elif isinstance(value, (discord.Member, discord.User)):
@@ -137,13 +182,12 @@ def _serialize_value(value: Any) -> Any:
             'display_name': display, 'discriminator': value.discriminator,
             'bot': value.bot, 'type': 'user'
         }
-    elif isinstance(value, (discord.abc.GuildChannel, discord.Thread)): # Gộp channel và thread
+    elif isinstance(value, (discord.abc.GuildChannel, discord.Thread)):
          parent_id = getattr(value, 'parent_id', None)
          return {
              'id': str(value.id), 'name': value.name, 'type': str(value.type),
              'parent_id': str(parent_id) if parent_id else None
          }
-    # <<< END FIX >>>
     elif isinstance(value, discord.Invite):
         return {
             'code': value.code,
@@ -154,16 +198,14 @@ def _serialize_value(value: Any) -> Any:
     elif isinstance(value, discord.Asset):
         return {'url': str(value), 'key': value.key, 'type': 'asset'}
     elif isinstance(value, datetime.datetime):
-        # <<< FIX: Luôn trả về ISO format UTC >>>
         try:
             if value.tzinfo is None:
                 aware_dt = value.replace(tzinfo=datetime.timezone.utc)
             else:
                 aware_dt = value.astimezone(datetime.timezone.utc)
             return {'iso_utc': aware_dt.isoformat(), 'type': 'datetime'}
-        except Exception: # Fallback nếu có lỗi timezone
+        except Exception:
             return {'iso_naive': value.isoformat(), 'type': 'datetime_naive'}
-        # <<< END FIX >>>
     elif isinstance(value, datetime.timedelta):
         return {'total_seconds': value.total_seconds(), 'type': 'timedelta'}
     elif isinstance(value, discord.Colour):
@@ -174,19 +216,14 @@ def _serialize_value(value: Any) -> Any:
             'names': [name for name, enabled in iter(value) if enabled],
             'type': 'permissions'
         }
-    # <<< FIX: Xử lý list các object (quan trọng cho roles) >>>
     elif isinstance(value, list):
-        # Cẩn thận với list role objects
         return [_serialize_value(item) for item in value]
-    # <<< END FIX >>>
     elif isinstance(value, discord.enums.Enum):
         try:
             return {'name': value.name, 'value': value.value, 'type': type(value).__name__}
-        except AttributeError: # Một số enum không có value?
+        except AttributeError:
             return {'repr': repr(value), 'type': type(value).__name__}
-    # <<< FIX: Xử lý các Snowflake khác và fallback >>>
     elif isinstance(value, discord.abc.Snowflake):
-         # Cố gắng lấy ID và tên nếu có
          obj_id = str(value.id)
          obj_name = getattr(value, 'name', None)
          repr_val = repr(value)
@@ -194,43 +231,25 @@ def _serialize_value(value: Any) -> Any:
          if obj_name: data['name'] = obj_name
          return data
     else:
-        # Fallback cuối cùng cho các loại không xác định
         try: repr_val = repr(value)
         except Exception: repr_val = "<Unrepresentable Object>"
         log.debug(f"Không thể serialize đối tượng loại {type(value).__name__}: {repr_val[:100]}")
         return {'repr': repr_val, 'type': str(type(value).__name__)}
-    # <<< END FIX >>>
 
 def _serialize_changes(changes: discord.AuditLogChanges) -> Optional[Dict[str, Any]]:
-    """Serialize AuditLogChanges thành một dict tương thích JSON chi tiết."""
     if not changes:
         return None
-
     data = {'before': {}, 'after': {}}
-    # <<< FIX: Dùng dir() không an toàn, dùng __slots__ nếu có hoặc các thuộc tính đã biết >>>
-    # Thay vì dir(), chúng ta nên dựa vào các thuộc tính thường thấy trong changes
-    # Hoặc nếu cần chi tiết hơn, phải xử lý từng action type riêng biệt.
-    # Cách đơn giản và an toàn hơn là chỉ lấy các thuộc tính chính:
-    # Ví dụ: attributes_to_check = ['name', 'topic', 'roles', 'nick', 'mute', 'deaf', ...]
-    # Hoặc dựa vào __slots__ nếu có và đáng tin cậy
     attributes_to_check = set()
     if hasattr(changes.before, '__slots__'): attributes_to_check.update(changes.before.__slots__)
     if hasattr(changes.after, '__slots__'): attributes_to_check.update(changes.after.__slots__)
-    # Thêm các key phổ biến khác nếu slots không đủ
     attributes_to_check.update(['name', 'id', 'type', 'roles', 'nick', 'mute', 'deaf', 'permissions', 'color', 'hoist', 'mentionable', 'topic', 'nsfw', 'bitrate', 'user_limit'])
-    # <<< END FIX >>>
-
     keys_with_changes = set()
     for attr in attributes_to_check:
-        # Bỏ qua các thuộc tính private/magic
         if attr.startswith('_'): continue
-
         try:
             before_val = getattr(changes.before, attr, discord.utils.MISSING) if changes.before else discord.utils.MISSING
             after_val = getattr(changes.after, attr, discord.utils.MISSING) if changes.after else discord.utils.MISSING
-
-            # Chỉ serialize nếu giá trị tồn tại ở ít nhất một bên và khác nhau
-            # Và không phải là phương thức callable
             if (before_val is not discord.utils.MISSING or after_val is not discord.utils.MISSING) and before_val != after_val:
                  is_callable = callable(before_val) or callable(after_val)
                  if not is_callable:
@@ -241,71 +260,41 @@ def _serialize_changes(changes: discord.AuditLogChanges) -> Optional[Dict[str, A
                     keys_with_changes.add(attr)
         except Exception as e:
             log.debug(f"Lỗi serialize thuộc tính '{attr}' trong audit log changes: {e}")
-
-    # Chỉ trả về nếu có sự thay đổi thực sự
     return data if keys_with_changes else None
-# <<< END FIX >>>
 
+
+# --- Các hàm thao tác DB (Audit Log - Giữ nguyên từ trước) ---
 async def add_audit_log_entry(log_entry: discord.AuditLogEntry):
-    """Thêm hoặc cập nhật một entry audit log trong cache."""
     if not pool or not log_entry:
         log.warning("Bỏ qua add_audit_log_entry do pool DB hoặc log_entry không hợp lệ.")
         return
-
     try:
         async with pool.acquire() as conn:
             user_id = log_entry.user.id if log_entry.user else None
             target_id: Optional[int] = None
             target_obj = log_entry.target
-
-            # Cố gắng lấy target_id một cách an toàn
             try:
-                if isinstance(target_obj, discord.abc.Snowflake):
-                    target_id = target_obj.id
-                elif isinstance(target_obj, dict) and 'id' in target_obj:
-                    # Audit log đôi khi trả về dict cho target bị xóa
-                    target_id = int(target_obj['id'])
-                elif isinstance(target_obj, str): # Xử lý target là string (ví dụ: webhook delete)
-                    log.debug(f"Audit log target là string: '{target_obj}' for action {log_entry.action}. target_id sẽ là NULL.")
-                    target_id = None
+                if isinstance(target_obj, discord.abc.Snowflake): target_id = target_obj.id
+                elif isinstance(target_obj, dict) and 'id' in target_obj: target_id = int(target_obj['id'])
+                elif isinstance(target_obj, str): log.debug(f"Audit log target là string: '{target_obj}' for action {log_entry.action}. target_id sẽ là NULL."); target_id = None
             except (ValueError, TypeError, AttributeError) as e:
                 log.warning(f"Không thể trích xuất ID từ audit log target type {type(target_obj)} (Value: {target_obj}, Action: {log_entry.action}): {e}")
                 target_id = None
-
-            # Serialize dữ liệu thay đổi
-            # <<< FIX: Sử dụng _serialize_changes đã cải thiện >>>
             extra_data = _serialize_changes(log_entry.changes)
-            # <<< END FIX >>>
-
-            # Câu lệnh UPSERT
             query = """
                 INSERT INTO audit_log_cache (log_id, guild_id, user_id, target_id, action_type, reason, created_at, extra_data)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (log_id) DO UPDATE SET
-                    guild_id = EXCLUDED.guild_id,
-                    user_id = EXCLUDED.user_id,
-                    target_id = EXCLUDED.target_id,
-                    action_type = EXCLUDED.action_type,
-                    reason = EXCLUDED.reason,
-                    created_at = EXCLUDED.created_at,
-                    extra_data = EXCLUDED.extra_data;
-            """
-            # <<< FIX: Đảm bảo created_at có timezone >>>
+                    guild_id = EXCLUDED.guild_id, user_id = EXCLUDED.user_id, target_id = EXCLUDED.target_id,
+                    action_type = EXCLUDED.action_type, reason = EXCLUDED.reason, created_at = EXCLUDED.created_at,
+                    extra_data = EXCLUDED.extra_data; """
             created_at_aware = log_entry.created_at
-            if created_at_aware.tzinfo is None:
-                created_at_aware = created_at_aware.replace(tzinfo=datetime.timezone.utc)
-            # <<< END FIX >>>
-
-            await conn.execute(query, log_entry.id, log_entry.guild.id, user_id, target_id,
-                               str(log_entry.action.name), log_entry.reason,
-                               created_at_aware, extra_data) # <<< FIX: Dùng created_at_aware
-            # log.debug(f"Đã thêm/cập nhật audit log entry {log_entry.id} cho guild {log_entry.guild.id}") # Giảm log
-
+            if created_at_aware.tzinfo is None: created_at_aware = created_at_aware.replace(tzinfo=datetime.timezone.utc)
+            await conn.execute(query, log_entry.id, log_entry.guild.id, user_id, target_id, str(log_entry.action.name), log_entry.reason, created_at_aware, extra_data)
     except Exception as e:
         log.error(f"Lỗi thêm entry audit log {log_entry.id} cho guild {log_entry.guild.id}: {e}", exc_info=False)
 
 async def get_newest_audit_log_id_from_db(guild_id: int) -> Optional[int]:
-    """Lấy ID của audit log mới nhất đã xử lý cho guild này từ guild_metadata."""
     if not pool: return None
     query = "SELECT last_audit_log_id FROM guild_metadata WHERE guild_id = $1"
     try:
@@ -317,104 +306,135 @@ async def get_newest_audit_log_id_from_db(guild_id: int) -> Optional[int]:
         return None
 
 async def update_newest_audit_log_id(guild_id: int, newest_log_id: Optional[int]):
-    """Cập nhật ID audit log mới nhất đã xử lý cho guild trong guild_metadata."""
     if not pool: return
     if newest_log_id is None:
         log.debug(f"Bỏ qua cập nhật ID audit log mới nhất cho guild {guild_id} vì newest_log_id là None.")
         return
-
     now = datetime.datetime.now(datetime.timezone.utc)
     query = """
-        INSERT INTO guild_metadata (guild_id, last_audit_log_id, last_audit_scan_time)
-        VALUES ($1, $2, $3)
+        INSERT INTO guild_metadata (guild_id, last_audit_log_id, last_audit_scan_time) VALUES ($1, $2, $3)
         ON CONFLICT (guild_id) DO UPDATE SET
-            last_audit_log_id = EXCLUDED.last_audit_log_id,
-            last_audit_scan_time = EXCLUDED.last_audit_scan_time
-        WHERE EXCLUDED.last_audit_log_id IS NOT NULL AND -- <<< FIX: Chỉ cập nhật nếu newest_log_id mới lớn hơn
-              (guild_metadata.last_audit_log_id IS NULL OR EXCLUDED.last_audit_log_id > guild_metadata.last_audit_log_id);
-    """
-    # <<< END FIX >>>
+            last_audit_log_id = EXCLUDED.last_audit_log_id, last_audit_scan_time = EXCLUDED.last_audit_scan_time
+        WHERE EXCLUDED.last_audit_log_id IS NOT NULL AND
+              (guild_metadata.last_audit_log_id IS NULL OR EXCLUDED.last_audit_log_id > guild_metadata.last_audit_log_id); """
     try:
         async with pool.acquire() as conn:
-            # <<< FIX: Thực thi và kiểm tra kết quả >>>
             result = await conn.execute(query, guild_id, newest_log_id, now)
-            if result and 'UPDATE 1' in result.upper() or 'INSERT 0 1' in result.upper():
-                 log.info(f"Đã cập nhật ID audit log mới nhất cho guild {guild_id} thành {newest_log_id}")
-            else:
-                 log.debug(f"ID audit log {newest_log_id} không mới hơn ID đã lưu cho guild {guild_id}. Bỏ qua cập nhật.")
-            # <<< END FIX >>>
+            if result and ('UPDATE 1' in result.upper() or 'INSERT 0 1' in result.upper()): log.info(f"Đã cập nhật ID audit log mới nhất cho guild {guild_id} thành {newest_log_id}")
+            else: log.debug(f"ID audit log {newest_log_id} không mới hơn ID đã lưu cho guild {guild_id}. Bỏ qua cập nhật.")
     except Exception as e:
         log.error(f"Lỗi cập nhật ID audit log mới nhất cho guild {guild_id}: {e}", exc_info=False)
 
-
-async def get_audit_logs_for_report(
-    guild_id: int,
-    limit: Optional[int] = 200,
-    action_filter: Optional[List[Union[discord.AuditLogAction, str]]] = None,
-    time_after: Optional[datetime.datetime] = None
-) -> List[Dict[str, Any]]:
-    """
-    Truy xuất các audit log đã cache từ DB để báo cáo, với các bộ lọc tùy chọn.
-    Trả về một list các dict.
-    Nếu limit là None, sẽ cố gắng lấy tất cả các bản ghi phù hợp.
-    """
+async def get_audit_logs_for_report(guild_id: int, limit: Optional[int] = 200, action_filter: Optional[List[Union[discord.AuditLogAction, str]]] = None, time_after: Optional[datetime.datetime] = None) -> List[Dict[str, Any]]:
     if not pool: return []
-
     query_base = "SELECT log_id, user_id, target_id, action_type, reason, created_at, extra_data FROM audit_log_cache"
-    conditions = ["guild_id = $1"]
-    params: List[Any] = [guild_id] # List để chứa các tham số
-    param_count = 1 # Đếm số lượng tham số ($1, $2, ...)
-
+    conditions = ["guild_id = $1"]; params: List[Any] = [guild_id]; param_count = 1
     if time_after:
-        param_count += 1
-        # <<< FIX: Đảm bảo time_after có timezone >>>
-        time_after_aware = time_after
-        if time_after_aware.tzinfo is None:
-            time_after_aware = time_after_aware.replace(tzinfo=datetime.timezone.utc)
-        conditions.append(f"created_at > ${param_count}")
-        params.append(time_after_aware)
-        # <<< END FIX >>>
-
+        param_count += 1; time_after_aware = time_after
+        if time_after_aware.tzinfo is None: time_after_aware = time_after_aware.replace(tzinfo=datetime.timezone.utc)
+        conditions.append(f"created_at > ${param_count}"); params.append(time_after_aware)
     if action_filter:
         action_names = []
         for action in action_filter:
-            if isinstance(action, discord.AuditLogAction):
-                action_names.append(action.name) # Lấy tên của Enum
-            elif isinstance(action, str):
-                action_names.append(action) # Giữ nguyên nếu đã là string
-            else:
-                log.warning(f"Loại action_filter không hợp lệ: {type(action)}, bỏ qua.")
-
-        if action_names: # Chỉ thêm điều kiện nếu có action hợp lệ
-            # <<< FIX: Sử dụng ANY() cho cả 1 hoặc nhiều action để code nhất quán >>>
+            if isinstance(action, discord.AuditLogAction): action_names.append(action.name)
+            elif isinstance(action, str): action_names.append(action)
+            else: log.warning(f"Loại action_filter không hợp lệ: {type(action)}, bỏ qua.")
+        if action_names:
             placeholders = ', '.join(f'${i + param_count + 1}' for i in range(len(action_names)))
-            conditions.append(f"action_type = ANY(ARRAY[{placeholders}]::text[])") # Chỉ định kiểu là text[]
-            params.extend(action_names) # Truyền list các tên action (string)
-            param_count += len(action_names)
-            # <<< END FIX >>>
-
-    # Ghép các điều kiện
-    where_clause = " AND ".join(conditions)
-    query = f"{query_base} WHERE {where_clause}"
-
-    # Sắp xếp và giới hạn
-    query += f" ORDER BY created_at DESC" # Lấy mới nhất trước
-    if limit is not None:
-        param_count += 1
-        query += f" LIMIT ${param_count}"
-        params.append(limit)
-
+            conditions.append(f"action_type = ANY(ARRAY[{placeholders}]::text[])"); params.extend(action_names); param_count += len(action_names)
+    where_clause = " AND ".join(conditions); query = f"{query_base} WHERE {where_clause}"
+    query += f" ORDER BY created_at DESC"
+    if limit is not None: param_count += 1; query += f" LIMIT ${param_count}"; params.append(limit)
     log.debug(f"Executing get_audit_logs query: {query} with params: {params}")
     try:
+        async with pool.acquire() as conn: rows = await asyncio.wait_for(conn.fetch(query, *params), timeout=45.0); return [dict(row) for row in rows]
+    except asyncio.TimeoutError: log.error(f"Timeout khi fetch audit logs cho báo cáo (Guild {guild_id}, Limit: {limit})"); return []
+    except Exception as e: log.error(f"Lỗi fetch audit logs cho báo cáo (Guild {guild_id}, Limit: {limit}): {e}", exc_info=False); return []
+
+
+# --- Các hàm thao tác DB (Scan Records & User Results - Mới thêm) ---
+async def create_scan_record(guild_id: int, requested_by_user_id: Optional[int]) -> Optional[int]:
+    """Tạo một bản ghi quét mới và trả về scan_id."""
+    if not pool: return None
+    query = """
+        INSERT INTO scans (guild_id, requested_by_user_id, status)
+        VALUES ($1, $2, 'running')
+        RETURNING scan_id;
+    """
+    try:
         async with pool.acquire() as conn:
-            # Sử dụng timeout để tránh treo vô hạn
-            rows = await asyncio.wait_for(conn.fetch(query, *params), timeout=45.0)
-            return [dict(row) for row in rows] # Chuyển Record thành dict
-    except asyncio.TimeoutError:
-        log.error(f"Timeout khi fetch audit logs cho báo cáo (Guild {guild_id}, Limit: {limit})")
-        return []
+            result = await conn.fetchrow(query, guild_id, requested_by_user_id)
+            if result and result['scan_id']:
+                log.info(f"Đã tạo bản ghi quét mới scan_id: {result['scan_id']} cho guild {guild_id}")
+                return result['scan_id']
+            else:
+                log.error("Không thể tạo bản ghi quét mới (không có ID trả về).")
+                return None
     except Exception as e:
-        log.error(f"Lỗi fetch audit logs cho báo cáo (Guild {guild_id}, Limit: {limit}): {e}", exc_info=False)
-        return []
+        log.error(f"Lỗi khi tạo bản ghi quét cho guild {guild_id}: {e}", exc_info=True)
+        return None
+
+async def save_user_scan_results(scan_id: int, user_results: List[Dict[str, Any]]):
+    """Lưu hàng loạt kết quả của user vào database."""
+    if not pool or not user_results: return
+    query = """
+        INSERT INTO user_scan_results (
+            scan_id, user_id, display_name_at_scan, is_bot, message_count,
+            reaction_received_count, reaction_given_count, reply_count,
+            mention_given_count, mention_received_count, link_count, image_count,
+            sticker_count, other_file_count, distinct_channels_count,
+            first_seen_utc, last_seen_utc, activity_span_seconds,
+            ranking_data, achievement_data
+            -- raw_dm_embed_data (Tùy chọn)
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+        )
+        ON CONFLICT (scan_id, user_id) DO UPDATE SET
+            display_name_at_scan = EXCLUDED.display_name_at_scan,
+            is_bot = EXCLUDED.is_bot, message_count = EXCLUDED.message_count,
+            reaction_received_count = EXCLUDED.reaction_received_count,
+            reaction_given_count = EXCLUDED.reaction_given_count, reply_count = EXCLUDED.reply_count,
+            mention_given_count = EXCLUDED.mention_given_count, mention_received_count = EXCLUDED.mention_received_count,
+            link_count = EXCLUDED.link_count, image_count = EXCLUDED.image_count,
+            sticker_count = EXCLUDED.sticker_count, other_file_count = EXCLUDED.other_file_count,
+            distinct_channels_count = EXCLUDED.distinct_channels_count, first_seen_utc = EXCLUDED.first_seen_utc,
+            last_seen_utc = EXCLUDED.last_seen_utc, activity_span_seconds = EXCLUDED.activity_span_seconds,
+            ranking_data = EXCLUDED.ranking_data, achievement_data = EXCLUDED.achievement_data;
+            -- raw_dm_embed_data = EXCLUDED.raw_dm_embed_data;
+    """
+    data_tuples = []
+    for user_data in user_results:
+        data_tuples.append((
+            scan_id, user_data.get('user_id'), user_data.get('display_name_at_scan'), user_data.get('is_bot'),
+            user_data.get('message_count', 0), user_data.get('reaction_received_count', 0),
+            user_data.get('reaction_given_count', 0), user_data.get('reply_count', 0),
+            user_data.get('mention_given_count', 0), user_data.get('mention_received_count', 0),
+            user_data.get('link_count', 0), user_data.get('image_count', 0),
+            user_data.get('sticker_count', 0), user_data.get('other_file_count', 0),
+            user_data.get('distinct_channels_count', 0), user_data.get('first_seen_utc'),
+            user_data.get('last_seen_utc'), user_data.get('activity_span_seconds'),
+            user_data.get('ranking_data'), user_data.get('achievement_data')
+        ))
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction(): await conn.executemany(query, data_tuples)
+            log.info(f"Đã lưu {len(data_tuples)} kết quả user cho scan_id: {scan_id}")
+    except Exception as e:
+        log.error(f"Lỗi khi lưu hàng loạt kết quả user cho scan_id {scan_id}: {e}", exc_info=True)
+
+async def update_scan_status(scan_id: int, status: str, end_time: Optional[datetime.datetime] = None, website_ready: Optional[bool] = None, error: Optional[str] = None):
+    """Cập nhật trạng thái và thời gian kết thúc của một bản ghi quét."""
+    if not pool or not scan_id: return
+    updates = ["status = $2"]; params: List[Any] = [scan_id, status]; param_count = 2
+    if end_time: param_count += 1; updates.append(f"end_time = ${param_count}"); params.append(end_time)
+    if website_ready is not None: param_count += 1; updates.append(f"website_accessible = ${param_count}"); params.append(website_ready)
+    if error: param_count += 1; updates.append(f"error_message = ${param_count}"); params.append(error)
+    set_clause = ", ".join(updates); query = f"UPDATE scans SET {set_clause} WHERE scan_id = $1"
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(query, *params)
+            log.info(f"Đã cập nhật trạng thái scan_id {scan_id} thành '{status}'" + (" (Web Ready)" if website_ready else "") + (f" Error: {error[:50]}..." if error else ""))
+    except Exception as e:
+        log.error(f"Lỗi khi cập nhật trạng thái scan_id {scan_id}: {e}", exc_info=True)
 
 # --- END OF FILE database.py ---

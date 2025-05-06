@@ -1,39 +1,98 @@
-# --- START OF FILE .gitignore ---
-
-moitruongao/
-venv/
-*.venv
-env/
-ENV/
-
-
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+moitruongao/ # Thư mục venv của bạn
+# myenv/ # Hoặc bất kỳ tên venv nào bạn dùng
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+# dist/ # Nếu bot Python của bạn có build ra dist, nếu không thì comment dòng này
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+*.manifest
+*.spec
+
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+shiromi-web/client/dist/
+
+shiromi-web/client/.vite/
+
+
 .env
+.env.*.local # Ví dụ: .env.development.local
+.env.local
+
+shiromi-web/server/.env
 
 *.log
 logs/
 *.log.*
 
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
-.idea/
+
 .vscode/
+.idea/ # Cho JetBrains IDEs (PyCharm, WebStorm, etc.)
+*.project
+*.tmproj
+*.suo
+*.user
 *.sublime-project
 *.sublime-workspace
 
-
-build/
-dist/
-*.egg-info/
-downloads/
-*.bak
 *.swp
 *~
+*.tmp
+*.bak
+*.orig
 
 
-
-# --- END OF FILE .gitignore ---
+*.sqlite3
+*.db
+*.db-journal # SQLite
