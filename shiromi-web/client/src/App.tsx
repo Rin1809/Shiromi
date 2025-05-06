@@ -1,6 +1,6 @@
 // --- START OF FILE website/client/src/App.tsx ---
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import { Routes, Route, useParams } from 'react-router-dom'; 
 import SearchBar from './components/SearchBar';
 import UserInfoDisplay from './components/UserInfoDisplay';
 import './components/styles/App.css';
@@ -37,7 +37,6 @@ function ScanPage() {
   const [error, setError] = useState<string | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const { guildId } = useParams<{ guildId: string }>();
-  const navigate = useNavigate(); // Giữ lại navigate
   const [guildName, setGuildName] = useState<string | null>(null);
   const [introStage, setIntroStage] = useState<IntroStage>('cat');
   const [isFadingOut, setIsFadingOut] = useState(false);
@@ -58,11 +57,11 @@ function ScanPage() {
     setSearchResults([]);
     setSearchTerm('');
     setScanId(null);
-
-    let stage1Timer: NodeJS.Timeout | null = null;
-    let stage2Timer: NodeJS.Timeout | null = null;
-    let fade1Timer: NodeJS.Timeout | null = null;
-    let fade2Timer: NodeJS.Timeout | null = null;
+    
+    let stage1Timer: number | null = null; // Sửa thành number
+    let stage2Timer: number | null = null; // Sửa thành number
+    let fade1Timer: number | null = null; // Sửa thành number
+    let fade2Timer: number | null = null; // Sửa thành number
 
     const catDisplayTime = 1800;
     const serverNameDisplayTime = 2000; // Có thể cần tăng thêm chút nếu animation phức tạp hơn
