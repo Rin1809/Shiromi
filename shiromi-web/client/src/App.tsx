@@ -1,5 +1,5 @@
 // --- START OF FILE website/client/src/App.tsx ---
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Routes, Route, useParams } from 'react-router-dom';
 import SearchBar from './components/SearchBar';
 import UserInfoDisplay from './components/UserInfoDisplay';
