@@ -35,7 +35,7 @@ async def connect_db() -> Optional[asyncpg.Pool]:
             command_timeout=60
         )
         log.info("Đã thiết lập nhóm kết nối cơ sở dữ liệu.")
-        await setup_tables() # Tạo bảng sau khi kết nối thành công
+        await setup_tables() # Tạo/Cập nhật bảng sau khi kết nối thành công
     except (asyncpg.exceptions.InvalidCatalogNameError, OSError, ConnectionRefusedError, asyncpg.exceptions.CannotConnectNowError) as e:
         log.critical(f"CRITICAL: Không thể kết nối tới cơ sở dữ liệu: {e}.")
         pool = None
@@ -81,12 +81,12 @@ async def __set_json_codec(conn):
         log.error(f"Không thể đặt codec JSON cho kết nối {conn}: {e}", exc_info=True)
 
 async def setup_tables():
-    """Tạo các bảng cần thiết nếu chúng chưa tồn tại."""
+    """Tạo các bảng cần thiết nếu chúng chưa tồn tại và cập nhật cấu trúc nếu cần."""
     if not pool:
         log.error("Không thể thiết lập bảng, nhóm DB không khả dụng.")
         return
 
-    log.info("Đang kiểm tra/tạo bảng cơ sở dữ liệu...")
+    log.info("Đang kiểm tra/tạo/cập nhật bảng cơ sở dữ liệu...")
     try:
         async with pool.acquire() as conn:
             # --- BẢNG AUDIT LOG ---
@@ -124,12 +124,25 @@ async def setup_tables():
                     requested_by_user_id BIGINT,
                     start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     end_time TIMESTAMPTZ,
-                    status VARCHAR(20) NOT NULL DEFAULT 'running', -- 'running', 'completed', 'failed'
+                    status VARCHAR(30) NOT NULL DEFAULT 'running', -- Đã tăng giới hạn lên 30
                     website_accessible BOOLEAN DEFAULT FALSE,
                     error_message TEXT
                 );
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_guild_status_end ON scans (guild_id, status, website_accessible, end_time DESC);")
+
+            # Thêm lệnh ALTER TABLE để cập nhật bảng scans hiện có (chỉ chạy nếu cần)
+            try:
+                log.info("Đang thử cập nhật kiểu dữ liệu cột 'status' trong bảng 'scans' thành VARCHAR(30)...")
+                await conn.execute("ALTER TABLE scans ALTER COLUMN status TYPE VARCHAR(30);")
+                log.info("Cập nhật kiểu dữ liệu cột 'status' thành công (hoặc đã là VARCHAR(30)).")
+            except Exception as alter_err:
+                # Bắt lỗi cụ thể nếu cột không tồn tại hoặc lỗi khác, không dừng bot
+                # Ví dụ: asyncpg.exceptions.UndefinedColumnError
+                # Ví dụ: asyncpg.exceptions.DuplicateColumnError (không nên xảy ra với ALTER TYPE)
+                # Ghi log cảnh báo thay vì error
+                log.warning(f"Không thể ALTER COLUMN status (có thể không cần thiết hoặc lỗi khác): {alter_err}")
+
 
             # --- BẢNG USER SCAN RESULTS ---
             await conn.execute("""
@@ -138,7 +151,7 @@ async def setup_tables():
                     scan_id BIGINT NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
                     user_id BIGINT NOT NULL,
                     display_name_at_scan VARCHAR(100),
-                    avatar_url_at_scan VARCHAR(255), -- ĐÃ THÊM CỘT NÀY
+                    avatar_url_at_scan VARCHAR(255),
                     is_bot BOOLEAN,
                     message_count INTEGER DEFAULT 0,
                     reaction_received_count INTEGER DEFAULT 0,
@@ -164,10 +177,10 @@ async def setup_tables():
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scan_results_scan_user ON user_scan_results (scan_id, user_id);")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_scan_results_scan_name ON user_scan_results (scan_id, display_name_at_scan);")
 
-            log.info("Kiểm tra/Tạo bảng cơ sở dữ liệu thành công.")
+            log.info("Kiểm tra/Tạo/Cập nhật bảng cơ sở dữ liệu thành công.")
     except Exception as e:
         log.error(f"Lỗi khi thiết lập bảng cơ sở dữ liệu: {e}", exc_info=True)
-        raise e
+        raise e # Ném lại lỗi để dừng bot nếu không thể thiết lập DB
 
 
 # --- Các hàm Serialize (Giữ nguyên từ trước) ---
@@ -438,5 +451,8 @@ async def update_scan_status(scan_id: int, status: str, end_time: Optional[datet
             log.info(f"Đã cập nhật trạng thái scan_id {scan_id} thành '{status}'" + (" (Web Ready)" if website_ready else "") + (f" Error: {error[:50]}..." if error else ""))
     except Exception as e:
         log.error(f"Lỗi khi cập nhật trạng thái scan_id {scan_id}: {e}", exc_info=True)
+        # Ném lại lỗi StringDataRightTruncationError để traceback rõ ràng hơn
+        if isinstance(e, asyncpg.exceptions.StringDataRightTruncationError):
+             raise e
 
 # --- END OF FILE database.py ---

@@ -1,16 +1,26 @@
-# --- START OF FILE config.py ---
+# --- START OF FILE Shiromi/config.py ---
 import os
 import sys
 import logging
-from dotenv import load_dotenv
 import discord
 from typing import List, Optional, Set, Tuple, Dict
 import json
 
 log = logging.getLogger(__name__)
 
-# --- Tải biến môi trường ---
-load_dotenv()
+# --- Thêm cấu hình PROXY_BOT_ID ---
+PROXY_BOT_ID_STR = os.getenv("PROXY_BOT_ID")
+PROXY_BOT_ID = int(PROXY_BOT_ID_STR) if PROXY_BOT_ID_STR and PROXY_BOT_ID_STR.isdigit() else None
+
+# >>> THÊM DÒNG NÀY <<<
+log.info(f"[CONFIG CHECK] PROXY_BOT_ID loaded as: {PROXY_BOT_ID} (Type: {type(PROXY_BOT_ID)})")
+# >>> KẾT THÚC THÊM <<<
+
+if PROXY_BOT_ID:
+    log.info(f"PROXY_BOT_ID được cấu hình: {PROXY_BOT_ID}")
+else:
+    log.info("PROXY_BOT_ID không được cấu hình. Bot sẽ không chấp nhận lệnh từ proxy bot.")
+
 # Trong config.py, gần các hằng số khác
 MAX_CONCURRENT_CHANNEL_SCANS = int(os.getenv("MAX_CONCURRENT_CHANNEL_SCANS", "5"))
 log.info(f"Số kênh/luồng quét đồng thời tối đa: {MAX_CONCURRENT_CHANNEL_SCANS}")
@@ -99,14 +109,34 @@ log.info(f"Emoji cuối DM: {FINAL_DM_EMOJI}")
 # --- Cấu hình Audit Log Actions ---
 AUDIT_LOG_ACTIONS_TO_TRACK_STR = os.getenv("AUDIT_LOG_ACTIONS_TO_TRACK")
 AUDIT_LOG_ACTIONS_TO_TRACK = None
-if AUDIT_LOG_ACTIONS_TO_TRACK is None:
-    AUDIT_LOG_ACTIONS_TO_TRACK = [
+if AUDIT_LOG_ACTIONS_TO_TRACK is None: # Sửa lại logic này, vì gán None rồi kiểm tra None sẽ luôn True
+    # Mặc định sẽ sử dụng các actions này nếu biến môi trường không được đặt hoặc rỗng
+    default_actions = [
         discord.AuditLogAction.kick, discord.AuditLogAction.ban, discord.AuditLogAction.unban,
         discord.AuditLogAction.member_role_update, discord.AuditLogAction.member_update,
         discord.AuditLogAction.message_delete, discord.AuditLogAction.thread_create,
         discord.AuditLogAction.member_move, discord.AuditLogAction.member_disconnect,
     ]
+    if AUDIT_LOG_ACTIONS_TO_TRACK_STR: # Nếu biến môi trường có giá trị
+        try:
+            action_names_from_env = [name.strip() for name in AUDIT_LOG_ACTIONS_TO_TRACK_STR.split(',') if name.strip()]
+            AUDIT_LOG_ACTIONS_TO_TRACK = []
+            for action_name in action_names_from_env:
+                try:
+                    AUDIT_LOG_ACTIONS_TO_TRACK.append(getattr(discord.AuditLogAction, action_name))
+                except AttributeError:
+                    log.warning(f"Tên AuditLogAction không hợp lệ trong .env: '{action_name}', sẽ bỏ qua.")
+            if not AUDIT_LOG_ACTIONS_TO_TRACK: # Nếu sau khi parse không có action nào hợp lệ
+                log.warning("Không có AuditLogAction hợp lệ nào được cấu hình từ .env, sử dụng mặc định.")
+                AUDIT_LOG_ACTIONS_TO_TRACK = default_actions
+        except Exception as e:
+            log.error(f"Lỗi khi parse AUDIT_LOG_ACTIONS_TO_TRACK từ .env: {e}. Sử dụng mặc định.")
+            AUDIT_LOG_ACTIONS_TO_TRACK = default_actions
+    else: # Nếu biến môi trường rỗng hoặc không được đặt
+        AUDIT_LOG_ACTIONS_TO_TRACK = default_actions
+
 log.info(f"Audit log actions được theo dõi: {[a.name for a in AUDIT_LOG_ACTIONS_TO_TRACK]}")
+
 
 # --- Kiểm tra cấu hình quan trọng ---
 def check_critical_config():
@@ -122,4 +152,4 @@ def check_critical_config():
         for missing in critical_missing: print(f"- {missing}")
         sys.exit(1)
 
-# --- END OF FILE config.py ---
+# --- END OF FILE Shiromi/config.py ---

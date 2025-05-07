@@ -54,9 +54,9 @@ async def finalize_scan(scan_data: Dict[str, Any]):
         f"# Là {config.BOT_NAME} đây <:a_eneuroAYAYA:1367434562245890048> !! \n",
         "## ℹ️ Đã thu thập xong log !!",
         "## 📄 Đã viết xong báo cáo !! \n\n",
+        f"👉 Ghé qua {report_channel_mention} để xem báo cáo tổng hợp của Server trong 1 năm qua trên Discord nhe!"
         f"🔍 Tra cứu kết quả của mấy bạn khác tại: \n\n"
         f"## [Bấm vô đây: Hôm qua ᓚᘏᗢ | きのう]({website_link}) \n\n", # <<< THÊM LINK WEB
-        f"👉 Ghé qua {report_channel_mention} để xem báo cáo tổng hợp của Server trong 1 năm qua trên Discord nhe!"
     ]
     intermediate_message = "\n".join(intermediate_message_lines)
     intermediate_sticker = await utils.fetch_sticker_object(config.INTERMEDIATE_STICKER_ID, bot, server)

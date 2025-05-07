@@ -4,29 +4,29 @@ from discord.ext import commands
 import logging
 import asyncio
 import datetime
-import time
+import time # Giữ lại time cho delay
 from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from collections import Counter, defaultdict
-import collections
+import collections # Giữ lại collections cho Counter và type hints
 
-import config 
+import config # Cần config cho IDs, mapping ảnh, emoji cuối
 import utils
-from reporting import embeds_dm
+from reporting import embeds_dm # <<< IMPORT CÁC HÀM TẠO EMBED TỪ ĐÂY
 
 log = logging.getLogger(__name__)
 
-# Constants giữ nguyên
+# --- Constants cho việc gửi DM (Giữ lại ở đây) ---
 DELAY_BETWEEN_USERS = 3.5
 DELAY_BETWEEN_MESSAGES = 0.8
 DELAY_BETWEEN_EMBEDS = 1.8
 DELAY_ON_HTTP_ERROR = 5.0
 DELAY_ON_FORBIDDEN = 1.0
 DELAY_ON_UNKNOWN_ERROR = 3.0
-# <<< ĐỔI TÊN CONSTANT CHO RÕ NGHĨA >>>
 DELAY_AFTER_FINAL_ITEM = 1.5
 
-# --- Hàm _prepare_ranking_data giữ nguyên ---
+# --- Hàm _prepare_ranking_data (Giữ lại ở đây) ---
 async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild) -> Dict[str, Dict[int, int]]:
+    """Chuẩn bị dữ liệu xếp hạng cho người dùng."""
     rankings: Dict[str, Dict[int, int]] = {}
     e = lambda name: utils.get_emoji(name, scan_data["bot"]) # Hàm lấy emoji
 
@@ -126,7 +126,6 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     rankings["images_sent"] = get_ranks_from_counter(scan_data.get("user_image_counts"), filter_admin=True)
     rankings["threads_created"] = get_ranks_from_counter(scan_data.get("user_thread_creation_counts"), filter_admin=True)
 
-
     # BXH Danh hiệu đặc biệt
     tracked_grants = scan_data.get("tracked_role_grant_counts", Counter())
     for rid in config.TRACKED_ROLE_GRANT_IDS:
@@ -152,8 +151,11 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     log.debug(f"{e('success')} Hoàn thành tính toán dữ liệu xếp hạng ({len(rankings)} BXH) trong {end_rank_time - start_rank_time:.2f}s.")
     return rankings
 
-
-async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mode: bool):
+# --- Hàm Chính: Send Personalized DM Reports (Logic Gửi) ---
+async def send_personalized_dm_reports(
+    scan_data: Dict[str, Any],
+    is_testing_mode: bool
+):
     """Gửi báo cáo DM cá nhân hóa."""
     guild: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
@@ -161,14 +163,13 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     recipient_role_id: Optional[int] = config.DM_REPORT_RECIPIENT_ROLE_ID
     thank_you_role_ids: Set[int] = config.BOOSTER_THANKYOU_ROLE_IDS
     admin_user_id: Optional[int] = config.ADMIN_USER_ID
-    quy_toc_anh_mapping: Dict[str, str] = config.QUY_TOC_ANH_MAPPING # Lấy mapping từ config
-    # <<< LẤY EMOJI CUỐI TỪ CONFIG >>>
+    quy_toc_anh_mapping: Dict[str, str] = config.QUY_TOC_ANH_MAPPING
     final_dm_emoji: str = config.FINAL_DM_EMOJI
 
     is_test_mode = is_testing_mode
     log.debug(f"[DM Sender] Explicit is_testing_mode received = {is_test_mode}")
 
-    # --- Lấy đối tượng admin (luôn cần nếu test mode) ---
+    # --- Lấy đối tượng admin (nếu test mode) ---
     admin_member: Optional[discord.Member] = None
     admin_dm_channel: Optional[discord.DMChannel] = None
     if is_test_mode:
@@ -184,7 +185,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                 return
             if isinstance(admin_member, discord.Member): # Đảm bảo admin còn trong server
                 admin_dm_channel = admin_member.dm_channel or await admin_member.create_dm()
-            else: # Nếu admin không còn trong server (hiếm)
+            else: # Nếu admin không còn trong server
                  log.warning(f"Admin {admin_user_id} không còn trong server, không thể lấy DM channel.")
                  scan_data["scan_errors"].append(f"Test DM thất bại: Admin ({admin_user_id}) không còn trong server.")
                  return
@@ -209,11 +210,12 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
         else:
             log.error(f"Không tìm thấy role nhận DM với ID: {recipient_role_id}.")
             scan_data["scan_errors"].append(f"Không tìm thấy Role nhận DM ({recipient_role_id}).")
-            if not is_test_mode: return
+            if not is_test_mode: return # Chỉ dừng nếu không phải test mode
     else:
         if not is_test_mode:
             log.info("Không có ID role nhận DM được cấu hình, bỏ qua gửi DM.")
             return
+        # Trong test mode mà không có role ID, xử lý tất cả (như logic cũ)
         log.warning("Không có role nhận DM được cấu hình, Test Mode sẽ xử lý TẤT CẢ user (không phải bot).")
         members_to_process = [m for m in guild.members if not m.bot]
         process_description = "tất cả thành viên (không phải bot)"
@@ -232,10 +234,8 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     if thank_you_roles:
         log.info(f"Lời cảm ơn đặc biệt sẽ được thêm cho các role: {[r.name for r in thank_you_roles]}")
 
-    # --- Chuẩn bị dữ liệu xếp hạng ---
+    # --- Chuẩn bị dữ liệu xếp hạng (gọi hàm helper) ---
     ranking_data = await _prepare_ranking_data(scan_data, guild)
-
-    # <<< XÓA PHẦN FETCH STICKER CUỐI >>>
 
     # --- Bắt đầu gửi DM ---
     sent_dm_count = 0
@@ -294,20 +294,20 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                     log.debug(f"Không tìm thấy ảnh cá nhân cho {member.display_name} ({member.id}) trong mapping.")
 
             # Tạo tin nhắn chào mừng/cảm ơn
-            default_image_url = "https://cdn.discordapp.com/attachments/1141675354470223887/1368708955911753751/image.png?ex=6819350c&is=6817e38c&hm=2152f8ecd42616638d092986066d6123338aea5e8c485fc3153d52d2f9ede2d5&" # URL ảnh mặc định
+            default_image_url = "https://cdn.discordapp.com/attachments/1247808882089263165/1369460522252242994/image.png?ex=681bf0ff&is=681a9f7f&hm=39c525ed331d6c9db56eb0b6df2645f196da4182931dd11cb2dfb77353d2d3cf&" # URL ảnh mặc định
             image_to_send = personalized_image_url # Ưu tiên ảnh cá nhân
 
             if user_has_thank_you_role:
-                thank_you_title = f"💖 Cảm ơn bạn đã là một phần tuyệt vời của {guild.name}! 💖"
+                thank_you_title = f"💖 Cảm ơn cậu đã là một phần tuyệt vời của {guild.name}! 💖"
                 thank_you_body = (
                     f"🎀 | Chào cậu, {member.mention},\n\n"
-                    f"Đầu tiên, thay mặt Rin - Misuzu và mọi người **{guild.name}**, bọn tớ xin gửi lời cảm ơn cậu vì đã **đóng góp/boost** cho server! ✨\n\n"
-                    f"Sự đóng góp của cậu giúp server ngày càng phát triển và duy trì một môi trường tuyệt vời cho tất cả mọi người á. \n\n"
-                    f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ! \n\n"
-                    f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này... \n\n"
-                    f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á \n\n"
-                    f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
-                    f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
+                    f"Bọn tớ cảm ơn cậu vì đã **đóng góp/boost** cho **{guild.name}** ! ✨\n\n"
+                    f"Sự đóng góp của cậu giúp server ngày càng phát triển và duy trì một môi trường tuyệt vời cho tất cả mọi người á.\n\n"
+                    f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ!\n\n"
+                    f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này...\n\n"
+                    f"Nhưng bức thư đây là dành riêng cho các [Quý tộc (Server Booster)🌠💫] | [| Người đóng góp (quý tộc-)] á\n\n"
+                    f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございました ！！*\n\n"
+                    f"Tớ là {config.BOT_NAME} | (Bot của Rinn)\n\n"
                     f"# ᓚᘏᗢ"
                 )
                 messages_to_send.append(thank_you_title + "\n\n" + thank_you_body)
@@ -316,12 +316,12 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                     image_to_send = default_image_url
             else:
                  greeting_msg = (
-                     f"📊 Chào cậu {member.mention}, \n\n"
-                     f"Đầu tiên, Thay mặt Rin - Misuzu và mọi người **{guild.name}**, bọn tớ xin gửi lời cảm ơn cậu vì đã có mặt và hoạt động trong server của bọn tớ vào thời gian qua! \n\n"
-                     f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ! \n\n"
-                     f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này... \n\n"
-                     f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございます！！* \n\n"
-                     f"Tớ là {config.BOT_NAME} | (Bot của Rin, thay mặt cho Rin gửi lời!) \n\n"
+                     f"🎀 | Chào cậu {member.mention},\n\n"
+                     f"Bọn tớ cảm ơn cậu vì đã có mặt và hoạt động trong server **{guild.name}** của bọn tớ vào thời gian qua!\n\n"
+                     f"Dưới đây là một chút tổng kết về hoạt động của cậu trong thời gian vừa qua (có thể có một chút sai số). Mong rằng cậu sẽ tiếp tục đồng hành cùng bọn tớ!\n\n"
+                     f"Mỗi Member sau khi xác thực role [🔭 | Cư Dân ᓚᘏᗢ] và bật nhận tin nhắn từ người lạ sẽ đều nhận được bức thư này...\n\n"
+                     f"*Một lần nữa, cảm ơn cậu nhé ! 本当にありがとうございました！！*\n\n"
+                     f"Tớ là {config.BOT_NAME} | (Bot của Rin)\n\n"
                      f"# ᓚᘏᗢ"
                  )
                  messages_to_send.append(greeting_msg)
@@ -332,7 +332,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
             if image_to_send:
                 messages_to_send.append(image_to_send)
 
-            # --- Tạo Embeds ---
+            # --- Tạo Embeds bằng cách gọi hàm từ embeds_dm ---
             personal_activity_embed = await embeds_dm.create_personal_activity_embed(member, scan_data, bot, ranking_data)
             if personal_activity_embed: embeds_to_send.append(personal_activity_embed)
             else: log.warning(f"Không thể tạo personal_activity_embed cho {member.display_name}")
@@ -372,7 +372,7 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                             log.warning(f"Target DM channel không còn hợp lệ khi gửi embed cho {target_description_log}")
                             raise Exception("Target DM channel became invalid") # Gây lỗi
 
-                # <<< GỬI EMOJI CUỐI CÙNG (NẾU CÓ) >>>
+                # Gửi emoji cuối cùng (nếu có)
                 if final_dm_emoji and target_dm_channel:
                     try:
                         log.debug(f"Đang gửi emoji cuối DM '{final_dm_emoji}' đến {target_description_log}...")
@@ -384,7 +384,6 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
                         log.warning(f"  -> Lỗi HTTP {emoji_err.status} khi gửi emoji cuối DM đến {target_description_log}: {emoji_err.text}")
                     except Exception as emoji_e:
                         log.warning(f"  -> Lỗi không xác định khi gửi emoji cuối DM đến {target_description_log}: {emoji_e}")
-                # <<< KẾT THÚC GỬI EMOJI >>>
 
                 sent_dm_count += 1
                 dm_successfully_sent = True # Đánh dấu đã gửi thành công
@@ -437,4 +436,5 @@ async def send_personalized_dm_reports(scan_data: Dict[str, Any], is_testing_mod
     log.info(f"Tổng cộng: {sent_dm_count} thành công, {failed_dm_count} thất bại.")
     if failed_dm_count > 0:
         scan_data["scan_errors"].append(f"Gửi DM ({mode_str}) thất bại cho {failed_dm_count} báo cáo.")
+
 # --- END OF FILE cogs/deep_scan_helpers/dm_sender.py ---
