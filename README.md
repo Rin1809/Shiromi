@@ -4,7 +4,7 @@ Setup:
 chuẩn bị file '.env' - đọc .env_example.txt
 sau đó chạy lệnh:
 ```
-pip install requirements.txt
+pip install -r requirements.txt
 ```
 
 run bot
@@ -12,12 +12,3 @@ run bot
 python bot.py
 ```
 
-vào server discord sử dụng lệnh:
-```
-# hoặc
-!serverdeepscan
-# hoặc
-!sds
-# hoặc
-!svexp 
-```
