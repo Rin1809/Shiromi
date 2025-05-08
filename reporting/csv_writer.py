@@ -344,7 +344,6 @@ async def _create_user_activity_csv(
     user_activity, files_list_ref, user_distinct_channel_counts,
     user_total_custom_emoji_content_counts, user_most_active_channel,
     user_reaction_given_counts,
-    # <<< THÊM THAM SỐ MỚI >>>
     user_emoji_received_counts: Optional[defaultdict] = None
 ):
     headers = [
@@ -353,7 +352,7 @@ async def _create_user_activity_csv(
         "Sticker Sent Count", "Mention Given Count", "Distinct Mention Given Count",
         "Mention Received Count", "Reply Count", "Reaction Received Count (Filtered)",
         "Reaction Given Count (Filtered)",
-        "Top Emoji Received Key", # <<< THÊM HEADER MỚI >>>
+        "Top Emoji Received Key",
         "Distinct Channels Messaged", "Most Active Location ID", "Most Active Location Msg Count",
         "First Seen UTC", "Last Seen UTC", "Activity Span (s)"
     ]
@@ -369,7 +368,6 @@ async def _create_user_activity_csv(
         most_active_count = most_active_data[1] if most_active_data else 0
         reaction_given_count = user_reaction_given_counts.get(user_id, 0) if user_reaction_given_counts else 0
 
-        # <<< TÌM TOP EMOJI NHẬN CHO CSV >>>
         top_emoji_received_key = "N/A"
         if user_emoji_received_counts:
             user_specific_counts = user_emoji_received_counts.get(user_id, Counter())
@@ -378,7 +376,6 @@ async def _create_user_activity_csv(
                     most_received_key, _ = user_specific_counts.most_common(1)[0]
                     top_emoji_received_key = str(most_received_key) # Lưu key (ID hoặc Unicode)
                 except (ValueError, IndexError): pass
-        # <<< KẾT THÚC TÌM TOP EMOJI >>>
 
         rows.append([
             user_id, data.get('is_bot', False), data.get('message_count', 0),
@@ -388,7 +385,7 @@ async def _create_user_activity_csv(
             data.get('mention_given_count', 0), distinct_mentions_given,
             data.get('mention_received_count', 0), data.get('reply_count', 0),
             data.get('reaction_received_count', 0), reaction_given_count,
-            top_emoji_received_key, # <<< THÊM DỮ LIỆU CỘT MỚI >>>
+            top_emoji_received_key, 
             distinct_channels, most_active_id, most_active_count,
             first_seen.isoformat() if first_seen else None,
             last_seen.isoformat() if last_seen else None,

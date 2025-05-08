@@ -5,16 +5,14 @@ import datetime
 import logging
 from typing import Dict, Any, Optional, Union, Tuple, List, Set, Callable
 from collections import Counter, defaultdict
-import collections # Giữ lại nếu cần cho type hints
+import collections
 import config
-# Bỏ các import không cần thiết cho việc tạo embed
-import utils # Giữ lại utils vì cần cho emoji, format,...
+import utils 
 
 log = logging.getLogger(__name__)
 
-# --- KHÔNG CÒN CÁC CONSTANTS GỬI DM Ở ĐÂY ---
-# --- KHÔNG CÒN HÀM _prepare_ranking_data Ở ĐÂY ---
-# --- KHÔNG CÒN HÀM send_personalized_dm_reports Ở ĐÂY ---
+
+
 
 # --- Constants cho việc tạo Embed (Nếu có, đặt ở đây) ---
 TOP_PERSONAL_ITEMS_LIMIT = 3

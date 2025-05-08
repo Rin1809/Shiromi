@@ -12,9 +12,9 @@ log = logging.getLogger(__name__)
 PROXY_BOT_ID_STR = os.getenv("PROXY_BOT_ID")
 PROXY_BOT_ID = int(PROXY_BOT_ID_STR) if PROXY_BOT_ID_STR and PROXY_BOT_ID_STR.isdigit() else None
 
-# >>> THÊM DÒNG NÀY <<<
+
 log.info(f"[CONFIG CHECK] PROXY_BOT_ID loaded as: {PROXY_BOT_ID} (Type: {type(PROXY_BOT_ID)})")
-# >>> KẾT THÚC THÊM <<<
+
 
 if PROXY_BOT_ID:
     log.info(f"PROXY_BOT_ID được cấu hình: {PROXY_BOT_ID}")
@@ -25,7 +25,6 @@ else:
 MAX_CONCURRENT_CHANNEL_SCANS = int(os.getenv("MAX_CONCURRENT_CHANNEL_SCANS", "5"))
 log.info(f"Số kênh/luồng quét đồng thời tối đa: {MAX_CONCURRENT_CHANNEL_SCANS}")
 # --- Helper Function ---
-# (Giữ nguyên các hàm helper: _parse_id_list, _parse_unicode_list, _parse_id, _load_quy_toc_anh_mapping)
 def _parse_id_list(env_var_name: str) -> Set[int]:
     id_str = os.getenv(env_var_name)
     if not id_str: return set()
@@ -109,7 +108,7 @@ log.info(f"Emoji cuối DM: {FINAL_DM_EMOJI}")
 # --- Cấu hình Audit Log Actions ---
 AUDIT_LOG_ACTIONS_TO_TRACK_STR = os.getenv("AUDIT_LOG_ACTIONS_TO_TRACK")
 AUDIT_LOG_ACTIONS_TO_TRACK = None
-if AUDIT_LOG_ACTIONS_TO_TRACK is None: # Sửa lại logic này, vì gán None rồi kiểm tra None sẽ luôn True
+if AUDIT_LOG_ACTIONS_TO_TRACK is None:
     # Mặc định sẽ sử dụng các actions này nếu biến môi trường không được đặt hoặc rỗng
     default_actions = [
         discord.AuditLogAction.kick, discord.AuditLogAction.ban, discord.AuditLogAction.unban,

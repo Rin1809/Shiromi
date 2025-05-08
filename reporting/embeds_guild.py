@@ -102,7 +102,6 @@ async def create_summary_embed(
         discord.ChannelType.category,
         discord.ChannelType.stage_voice,
         discord.ChannelType.forum,
-        # discord.ChannelType.news # Có thể thêm nếu cần
     ]
     total_channels_from_counter = 0
     for chan_type in types_to_show:

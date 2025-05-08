@@ -8,7 +8,6 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union, Counter as TypingCounter, DefaultDict as TypingDefaultDict, Tuple
 from collections import Counter, defaultdict
 
-# Import các module cần thiết
 import config
 import utils
 import database
@@ -18,17 +17,19 @@ import discord_logging
 from .deep_scan_helpers import (
     initialize_scan, scan_all_channels_and_threads, process_additional_data,
     generate_and_send_reports, generate_export_files, finalize_scan,
-    send_personalized_dm_reports # Import hàm gửi DM
+    send_personalized_dm_reports 
 )
 # Import hàm chuẩn bị ranking data từ dm_sender
 from .deep_scan_helpers.dm_sender import _prepare_ranking_data
 
-# Import các module tạo embeds (nhưng không gọi hàm _prepare_ranking_data từ đây nữa)
-# from reporting import embeds_dm # Không cần import này để gọi _prepare_ranking_data
+
+
+
+
 
 log = logging.getLogger(__name__)
 
-# --- HÀM LƯU KẾT QUẢ VÀO DB (Giữ nguyên) ---
+# --- HÀM LƯU KẾT QUẢ VÀO DB  ---
 async def save_aggregated_results_to_db(scan_data: Dict[str, Any], ranking_data: Dict[str, Dict[int, int]]):
     """Thu thập và lưu kết quả tổng hợp của từng user vào database."""
     scan_id = scan_data.get("scan_id")
@@ -107,7 +108,6 @@ async def save_aggregated_results_to_db(scan_data: Dict[str, Any], ranking_data:
             log.error(f"Lỗi khi thực hiện save_user_scan_results hoặc update_scan_status: {e_save}", exc_info=True)
             # Ghi nhận lỗi vào scan_data để báo cáo cuối cùng
             scan_data["scan_errors"].append(f"DB Save/Update Error: {e_save}")
-            # Không cần update status lại ở đây vì nó đã lỗi
     else:
         log.info("Không có kết quả user nào để lưu vào database.")
 
@@ -132,7 +132,7 @@ class ServerDeepScan(commands.Cog):
             return True
 
         log.warning(f"User {ctx.author} (ID: {ctx.author.id}) (not owner or proxy) tried to run '{ctx.command.name}'. Denying.")
-        # Không gửi tin nhắn lỗi ở đây nữa, để on_command_error xử lý chung
+
         return False # CheckFailure sẽ được raise và on_command_error sẽ bắt
 
     async def _perform_deep_scan(
@@ -331,7 +331,6 @@ class ServerDeepScan(commands.Cog):
             except Exception: pass
             # Reset cooldown nếu lỗi xảy ra sớm
             if not scan_data.get("scan_started", False) and ctx.command: ctx.command.reset_cooldown(ctx)
-            # Không cần raise lại nếu đã xử lý ở đây, trừ khi muốn on_command_error log thêm
 
         # --- Khối Finally: Luôn chạy để dọn dẹp ---
         finally:

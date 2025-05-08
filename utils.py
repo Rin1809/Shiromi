@@ -13,7 +13,7 @@ import asyncio
 import math
 import unicodedata
 import collections
-import config # Import config để dùng các biến mới nếu cần
+import config 
 
 log = logging.getLogger(__name__)
 

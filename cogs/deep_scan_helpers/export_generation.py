@@ -21,17 +21,17 @@ async def generate_export_files(scan_data: Dict[str, Any]):
     files_to_send: List[discord.File] = scan_data["files_to_send"]
 
     if not export_csv and not export_json:
-        return # Không có yêu cầu export
-
+        return 
+    
     log.info(f"\n--- [bold blue]{e('loading')} Đang tạo file xuất ({'CSV ' if export_csv else ''}{'JSON' if export_json else ''})[/bold blue] ---")
     start_time_export = time.monotonic()
 
     # --- Chuẩn bị dữ liệu chung cho export ---
     # (Lấy dữ liệu từ scan_data)
-    server_info = { # Tạo dict server_info tương tự như trong report_gen
+    server_info = { 
         'member_count_real': len([m for m in scan_data["current_members_list"] if not m.bot]),
         'bot_count': len([m for m in scan_data["current_members_list"] if m.bot]),
-        # Thêm các thông tin khác nếu cần
+
     }
     channel_details = scan_data["channel_details"]
     voice_channel_static_data = scan_data["voice_channel_static_data"]
@@ -91,7 +91,7 @@ async def generate_export_files(scan_data: Dict[str, Any]):
                 user_activity=user_activity, roles=roles, boosters=boosters,
                 invites=invites, webhooks=webhooks, integrations=integrations,
                 audit_logs=audit_logs_for_export, permission_audit=permission_audit,
-                scan_timestamp=scan_timestamp, files_list_ref=files_to_send, # Truyền list để thêm file
+                scan_timestamp=scan_timestamp, files_list_ref=files_to_send, 
                 # Optional data
                 oldest_members_data=oldest_members_data,
                 role_change_stats=role_change_stats, user_role_changes=user_role_changes,

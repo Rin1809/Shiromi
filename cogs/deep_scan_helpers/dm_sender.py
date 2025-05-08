@@ -4,18 +4,18 @@ from discord.ext import commands
 import logging
 import asyncio
 import datetime
-import time # Giữ lại time cho delay
+import time 
 from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from collections import Counter, defaultdict
-import collections # Giữ lại collections cho Counter và type hints
+import collections 
 
-import config # Cần config cho IDs, mapping ảnh, emoji cuối
+import config
 import utils
-from reporting import embeds_dm # <<< IMPORT CÁC HÀM TẠO EMBED TỪ ĐÂY
+from reporting import embeds_dm 
 
 log = logging.getLogger(__name__)
 
-# --- Constants cho việc gửi DM (Giữ lại ở đây) ---
+# --- Constants cho việc gửi DM ---
 DELAY_BETWEEN_USERS = 3.5
 DELAY_BETWEEN_MESSAGES = 0.8
 DELAY_BETWEEN_EMBEDS = 1.8
@@ -24,7 +24,7 @@ DELAY_ON_FORBIDDEN = 1.0
 DELAY_ON_UNKNOWN_ERROR = 3.0
 DELAY_AFTER_FINAL_ITEM = 1.5
 
-# --- Hàm _prepare_ranking_data (Giữ lại ở đây) ---
+# --- Hàm _prepare_ranking_data  ---
 async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild) -> Dict[str, Dict[int, int]]:
     """Chuẩn bị dữ liệu xếp hạng cho người dùng."""
     rankings: Dict[str, Dict[int, int]] = {}
@@ -47,7 +47,7 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
     def get_ranks_from_counter(
         counter: Optional[Union[collections.Counter, Dict[Any, int]]],
         filter_admin: bool = True,
-        min_value: int = 1 # Chỉ xếp hạng nếu giá trị >= min_value
+        min_value: int = 1 
     ) -> Dict[int, int]:
         if not counter: return {}
         # Đảm bảo là Counter để dùng most_common
@@ -64,9 +64,9 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
             user_id: Optional[int] = None
             if isinstance(key, int): user_id = key
             elif isinstance(key, str) and key.isdigit(): user_id = int(key)
-            else: continue # Bỏ qua key không hợp lệ
+            else: continue 
 
-            if count < min_value: continue # Bỏ qua nếu giá trị quá thấp
+            if count < min_value: continue 
 
             # Lọc admin nếu cần
             if filter_admin and user_id in admin_ids_to_filter:
@@ -87,7 +87,7 @@ async def _prepare_ranking_data(scan_data: Dict[str, Any], guild: discord.Guild)
              elif isinstance(user_id_any, str) and user_id_any.isdigit(): user_id = int(user_id_any)
 
              if user_id is not None:
-                 ranks[user_id] = i + 1 # Rank bắt đầu từ 1
+                 ranks[user_id] = i + 1
         return ranks
 
     # --- Hàm Helper tính Rank cho Tracked Roles ---
@@ -183,7 +183,7 @@ async def send_personalized_dm_reports(
                 log.error(f"Không tìm thấy Admin ({admin_user_id}) trong server để gửi Test DM.")
                 scan_data["scan_errors"].append(f"Test DM thất bại: Không tìm thấy Admin ({admin_user_id}).")
                 return
-            if isinstance(admin_member, discord.Member): # Đảm bảo admin còn trong server
+            if isinstance(admin_member, discord.Member):
                 admin_dm_channel = admin_member.dm_channel or await admin_member.create_dm()
             else: # Nếu admin không còn trong server
                  log.warning(f"Admin {admin_user_id} không còn trong server, không thể lấy DM channel.")
@@ -248,15 +248,15 @@ async def send_personalized_dm_reports(
 
         messages_to_send: List[str] = []
         embeds_to_send: List[discord.Embed] = []
-        dm_successfully_sent = False # Cờ để biết đã gửi thành công chưa
+        dm_successfully_sent = False 
 
         # --- Xác định đích gửi DM ---
         target_dm_channel: Optional[Union[discord.DMChannel, Any]] = None
-        target_description_log = "" # Để log cho rõ
-        is_sending_to_admin = False # Cờ để biết có cần thêm prefix không
+        target_description_log = ""
+        is_sending_to_admin = False
 
         if is_test_mode:
-            target_dm_channel = admin_dm_channel # Đã lấy ở trên
+            target_dm_channel = admin_dm_channel 
             target_description_log = f"Admin ({admin_member.id if admin_member else 'N/A'})"
             is_sending_to_admin = True
             test_prefix = f"```---\n📝 Báo cáo Test cho: {member.display_name} ({member.id})\n---```\n"
@@ -360,7 +360,7 @@ async def send_personalized_dm_reports(
                             await asyncio.sleep(DELAY_BETWEEN_MESSAGES)
                         else:
                             log.warning(f"Target DM channel không còn hợp lệ khi gửi message cho {target_description_log}")
-                            raise Exception("Target DM channel became invalid") # Gây lỗi để vào except bên dưới
+                            raise Exception("Target DM channel became invalid") 
 
                 # Gửi embeds sau
                 for embed in embeds_to_send:
@@ -370,14 +370,14 @@ async def send_personalized_dm_reports(
                             await asyncio.sleep(DELAY_BETWEEN_EMBEDS)
                         else:
                             log.warning(f"Target DM channel không còn hợp lệ khi gửi embed cho {target_description_log}")
-                            raise Exception("Target DM channel became invalid") # Gây lỗi
+                            raise Exception("Target DM channel became invalid")
 
                 # Gửi emoji cuối cùng (nếu có)
                 if final_dm_emoji and target_dm_channel:
                     try:
                         log.debug(f"Đang gửi emoji cuối DM '{final_dm_emoji}' đến {target_description_log}...")
-                        await target_dm_channel.send(final_dm_emoji) # Send emoji as content
-                        await asyncio.sleep(DELAY_AFTER_FINAL_ITEM) # Dùng delay mới
+                        await target_dm_channel.send(final_dm_emoji) # Send emoji dạng content
+                        await asyncio.sleep(DELAY_AFTER_FINAL_ITEM) 
                     except discord.Forbidden:
                         log.warning(f"  -> Không thể gửi emoji cuối DM đến {target_description_log}: Bot bị chặn?")
                     except discord.HTTPException as emoji_err:
@@ -397,7 +397,7 @@ async def send_personalized_dm_reports(
                 if is_test_mode:
                     log.error("LỖI NGHIÊM TRỌNG: Không thể gửi Test DM đến Admin. Dừng gửi DM.")
                     scan_data["scan_errors"].append("Test DM thất bại: Không thể gửi DM đến Admin (Forbidden).")
-                    return # Dừng hẳn hàm
+                    return 
                 target_dm_channel = None # Đánh dấu channel không hợp lệ
             except discord.HTTPException as dm_http_err:
                 log.error(f"❌ Lỗi HTTP {dm_http_err.status} khi gửi DM đến {target_description_log} (cho báo cáo của {member.id}): {dm_http_err.text}")

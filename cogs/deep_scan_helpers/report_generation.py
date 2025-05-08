@@ -14,12 +14,12 @@ from reporting import embeds_guild, embeds_user, embeds_items, embeds_analysis, 
 
 log = logging.getLogger(__name__)
 
-# --- Hàm Gửi Embed Helper (Giữ nguyên) ---
+# --- Hàm Gửi Embed Helper---
 async def _send_report_embeds(
     scan_data: Dict[str, Any],
     embed_list: List[discord.Embed],
     type_name: str,
-    target_channel: Union[discord.TextChannel, discord.Thread] # Kênh đích
+    target_channel: Union[discord.TextChannel, discord.Thread]
 ):
     scan_errors: List[str] = scan_data["scan_errors"]
     bot: commands.Bot = scan_data["bot"]
@@ -71,7 +71,7 @@ async def _send_report_embeds(
 
     scan_data["report_messages_sent"] = report_messages_sent
 
-# --- Hàm Chính Tạo và Gửi Báo cáo CÔNG KHAI (Cập nhật) ---
+# --- Hàm Chính Tạo và Gửi Báo cáo CÔNG KHAI  ---
 async def generate_and_send_reports(scan_data: Dict[str, Any]):
     """Tạo và gửi các báo cáo embeds CÔNG KHAI theo thứ tự nhóm Ít/Nhiều."""
     server: discord.Guild = scan_data["server"]
@@ -84,7 +84,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     log_thread: Optional[discord.Thread] = scan_data.get("log_thread") # Lấy log thread
 
 
-    # Xác định kênh gửi báo cáo (Giữ nguyên)
+    # Xác định kênh gửi báo cáo 
     report_channel: Union[discord.TextChannel, discord.Thread] = ctx.channel # Mặc định là kênh gốc
     report_channel_id = config.REPORT_CHANNEL_ID
     report_channel_mention = ctx.channel.mention # Mention mặc định
@@ -112,7 +112,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     log.info(f"\n--- [bold green]{e('loading')} Đang Tạo Báo Cáo Embeds Công Khai vào kênh {report_channel.mention}[/bold green] ---")
     start_time_reports = time.monotonic()
 
-    # Chuẩn bị dữ liệu cần thiết (Giữ nguyên)
+    # Chuẩn bị dữ liệu cần thiết
     user_activity = scan_data["user_activity"]
     user_link_counts = scan_data.get("user_link_counts", Counter())
     user_image_counts = scan_data.get("user_image_counts", Counter())
@@ -142,14 +142,14 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     overall_custom_emoji_content_counts = scan_data.get("overall_custom_emoji_content_counts", Counter())
 
 
-    # === KHỐI TẠO EMBEDS (Giữ nguyên) ===
+    # === KHỐI TẠO EMBEDS ) ===
     summary_embeds = []
     analysis_embeds = []
     least_activity_embeds = []
     most_activity_embeds = []
     special_embeds = []
     error_embeds = []
-    # Helper _try_create_and_add_embed (Giữ nguyên)
+    # Helper _try_create_and_add_embed 
     async def _try_create_and_add_embed(embed_creation_func, target_list, error_list, *args, **kwargs):
         func_name = embed_creation_func.__name__
         try:
@@ -369,7 +369,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     log.info(f"--- {e('warning')} Nhóm 5: Báo cáo Lỗi ---")
     await _try_create_and_add_embed(
         embeds_analysis.create_error_embed, error_embeds, scan_errors,
-        scan_errors, bot=bot # Truyền scan_errors vào args
+        scan_errors, bot=bot 
     )
 
 
@@ -394,7 +394,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     except Exception as send_err:
         log.error(f"Lỗi gửi tin nhắn/sticker B vào kênh báo cáo: {send_err}")
         scan_errors.append(f"Lỗi gửi sticker B: {send_err}")
-    scan_data["report_messages_sent"] = report_messages_sent # Cập nhật lại
+    scan_data["report_messages_sent"] = report_messages_sent 
 
     # --- Gửi Nhóm 2 ---
     if least_activity_embeds: await _send_report_embeds(scan_data, least_activity_embeds, "Nhóm 2: Hoạt Động Ít Nhất", report_channel)
@@ -422,7 +422,7 @@ async def generate_and_send_reports(scan_data: Dict[str, Any]):
     # --- Gửi Nhóm 4 ---
     if special_embeds: await _send_report_embeds(scan_data, special_embeds, "Nhóm 4: BXH Đặc Biệt & Danh Hiệu", report_channel)
 
-    # --- Gửi Nhóm 5 (Lỗi) ---
+    # --- Gửi Nhóm 5 ---
     if error_embeds: await _send_report_embeds(scan_data, error_embeds, "Nhóm 5: Tóm tắt Lỗi", report_channel)
     elif scan_errors: log.error(f"Có {len(scan_errors)} lỗi nhưng không thể tạo embed báo cáo lỗi.")
     else: log.info("Không có lỗi nào được ghi nhận trong quá trình quét.")

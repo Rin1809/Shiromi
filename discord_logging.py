@@ -9,7 +9,7 @@ import traceback
 import time
 from typing import List, Optional, Dict, Any
 
-import utils # Giả sử utils.py có các hàm get_emoji
+import utils 
 
 # --- Globals cho Discord Logging ---
 log_queue = queue.Queue(-1) # Queue không giới hạn kích thước
@@ -68,7 +68,6 @@ async def send_log_batch(log_lines: List[str], thread_id: Optional[int], is_fina
 
         if not isinstance(thread, discord.Thread):
             log.error(f"Đối tượng lấy được cho ID {thread_id} không phải là thread.")
-            # Không xóa discord_target_thread ở đây vì nó được quản lý bởi lock ở nơi khác
             return
 
         if not log_lines and not is_final:
@@ -166,15 +165,14 @@ def discord_log_sender(bot_loop: asyncio.AbstractEventLoop):
         send_buffer_now = False
         record = None
         log_batch_to_send = []
-        current_target_thread_id_for_batch: Optional[int] = None # Di chuyển ra ngoài try
-
+        current_target_thread_id_for_batch: Optional[int] = None
         try:
             record = log_queue.get(block=True, timeout=1.0)
 
             if record is None:
                 log.info("[Discord Logger Thread] Nhận tín hiệu dừng (None).")
-                discord_log_thread_active = False # Sẽ gửi nốt buffer ở khối finally
-                send_buffer_now = True # Đánh dấu để gửi buffer trước khi thoát hẳn vòng lặp
+                discord_log_thread_active = False 
+                send_buffer_now = True 
             else:
                 if not discord_log_thread_active:
                     log_queue.task_done() # Đánh dấu record này cũng đã xong
@@ -330,8 +328,7 @@ def stop_discord_log_thread():
         return
 
     log.info("Chuẩn bị dừng Discord Logger Thread...")
-    # Không set discord_log_thread_active = False ở đây ngay lập tức
-    # mà để tín hiệu None trong queue kích hoạt việc dừng
+
 
     try:
         log_queue.put_nowait(None) # Gửi tín hiệu dừng
@@ -354,7 +351,7 @@ def stop_discord_log_thread():
             log.info("Discord Logger Thread đã dừng thành công.")
         discord_log_sender_thread = None
 
-    # Đảm bảo cờ active cuối cùng là False
+    #  cờ active cuối cùng phải là False 
     discord_log_thread_active = False
 
 

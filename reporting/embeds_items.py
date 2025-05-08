@@ -8,10 +8,9 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union, Set
 import unicodedata
 
-import utils # Chỉ import utils
+import utils
 import config
-# Bỏ import này vì hàm _format_user_tree_line đã chuyển sang utils
-# from .embeds_user import _format_user_tree_line
+
 
 log = logging.getLogger(__name__)
 

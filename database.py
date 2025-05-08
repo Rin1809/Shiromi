@@ -31,7 +31,7 @@ async def connect_db() -> Optional[asyncpg.Pool]:
             DATABASE_URL,
             min_size=2,
             max_size=10,
-            init=__set_json_codec, # <<< Đảm bảo codec JSON được thiết lập
+            init=__set_json_codec, 
             command_timeout=60
         )
         log.info("Đã thiết lập nhóm kết nối cơ sở dữ liệu.")

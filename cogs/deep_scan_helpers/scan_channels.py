@@ -256,7 +256,7 @@ async def _process_message(message: discord.Message, scan_data: Dict[str, Any], 
                          # Nếu là reaction được lọc và có key hợp lệ
                          if (is_inner_custom or is_inner_allowed_unicode) and inner_emoji_key is not None:
                               user_emoji_received_counter_for_author[inner_emoji_key] += inner_reaction.count
-                # <<< KẾT THÚC THÊM LOGIC >>>
+
 
         except AttributeError as attr_err:
             log_emoji_info = "N/A"

@@ -47,7 +47,7 @@ LEAST_THREAD_CREATORS_LIMIT = 10
 LEAST_DISTINCT_CHANNEL_USERS_LIMIT = 10
 
 
-# --- HÀM HELPER TẠO DÒNG USER CHO CÂY (Giữ nguyên) ---
+# --- HÀM HELPER TẠO DÒNG USER CHO CÂY ---
 async def _format_user_tree_line(
     rank: int,
     user_id: int,
@@ -77,9 +77,6 @@ async def _format_user_tree_line(
     if tertiary_info: lines.append(f"  `└` {tertiary_info}")
     lines.append("")
     return lines
-
-# --- HÀM HELPER CHUNG CHO TẠO BXH USER (ĐÃ DI CHUYỂN SANG utils.py) ---
-# -> XÓA BỎ ĐỊNH NGHĨA HÀM _create_user_leaderboard_embed Ở ĐÂY <-
 
 # --- CÁC HÀM TẠO EMBED "NHIỀU NHẤT" (GỌI HELPER TỪ UTILS) ---
 

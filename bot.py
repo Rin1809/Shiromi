@@ -3,14 +3,14 @@ import sys
 import os
 import asyncio
 import logging
-import traceback # Thêm traceback để log lỗi main
+import traceback 
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv # Import load_dotenv ở đây
+from dotenv import load_dotenv
 
-# >>> GỌI load_dotenv() NGAY TẠI ĐÂY <<<
+
 load_dotenv()
-print("[MAIN] Đã gọi load_dotenv() từ bot.py") # Thêm log xác nhận
+print("[MAIN] Đã gọi load_dotenv() từ bot.py")
 # -----------------------------------------
 
 # --- Thêm thư mục gốc vào sys.path ---
@@ -19,8 +19,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 # ------------------------------------
 
-# Bây giờ mới import các module của dự án
-import config # Đảm bảo config được import sau load_dotenv()
+import config 
 import database
 import discord_logging
 import utils
@@ -58,19 +57,17 @@ class ShiromiBot(commands.Bot):
 
         # Ưu tiên cho PROXY_BOT_ID
         if config.PROXY_BOT_ID and message.author.id == config.PROXY_BOT_ID:
-            # >>> DEBUG LOGGING <<<
+
             log.debug(f"_get_prefix: PROXY_BOT_ID ({config.PROXY_BOT_ID}) is sending potential command: '{message.content[:70]}'. Returning EMPTY prefix.")
-            # Đối với proxy bot, kỳ vọng lệnh được gửi trực tiếp mà không cần prefix thông thường của Shiromi.
             # Bot proxy (Mizuki) chịu trách nhiệm đảm bảo lệnh bắt đầu đúng.
             return "" # Prefix rỗng có nghĩa là tên lệnh phải ở đầu tin nhắn.
 
         # Nếu không phải PROXY_BOT_ID, chỉ cho phép nếu người gửi không phải là bot
         if not message.author.bot:
-            # >>> DEBUG LOGGING <<<
+
             log.debug(f"_get_prefix: User {message.author.id} sending message. Returning normal prefix config.")
             return commands.when_mentioned_or(config.COMMAND_PREFIX)(self, message)
 
-        # >>> DEBUG LOGGING <<<
         log.debug(f"_get_prefix: Other bot {message.author.id} or unhandled case. Returning no prefix match.")
         # Các trường hợp còn lại (bot khác không phải proxy) sẽ không có prefix
         return []
@@ -83,12 +80,11 @@ class ShiromiBot(commands.Bot):
         if message.author.id == self.user.id: # Bỏ qua tin nhắn từ chính nó
             return
 
-        # >>> DEBUG LOGGING <<<
+  
         log.debug(f"process_commands: Received message from {message.author} (ID: {message.author.id}, Bot: {message.author.bot}). Content: '{message.content[:70]}'")
 
         ctx = await self.get_context(message)
 
-        # >>> DEBUG LOGGING <<<
         log.debug(f"process_commands: Context created. Prefix: '{ctx.prefix}', Valid: {ctx.valid}, Command: '{ctx.command.qualified_name if ctx.command else 'None'}'")
 
         if ctx.command is not None and ctx.valid: # ctx.valid sẽ true nếu prefix khớp và lệnh tồn tại
@@ -116,7 +112,7 @@ class ShiromiBot(commands.Bot):
             await self.invoke(ctx)
         else:
             # Log tại sao lệnh không được xử lý
-            # >>> DEBUG LOGGING <<<
+
             if ctx.prefix is not None and message.content.startswith(ctx.prefix):
                 # Trường hợp có prefix nhưng không tìm thấy lệnh (ví dụ: user gõ Shi sai tên lệnh)
                 log.debug(f"No command found for message from {message.author} (ID: {message.author.id}) with prefix '{ctx.prefix}': {message.content[:70]}")
@@ -126,10 +122,6 @@ class ShiromiBot(commands.Bot):
             elif not message.author.bot and message.content.startswith(config.COMMAND_PREFIX):
                 # Trường hợp user dùng prefix thường nhưng không tìm thấy lệnh
                 log.debug(f"User message with normal prefix '{config.COMMAND_PREFIX}' but NO VALID COMMAND for: {message.content[:70]}")
-            # Các trường hợp khác (ví dụ bot khác gửi tin, user gửi tin không có prefix) đã được xử lý/log bởi _get_prefix
-            # else:
-            #     log.debug(f"Ignoring message from {message.author} (ID: {message.author.id}) - no prefix match or no command.")
-
 
     async def setup_hook(self):
         log.info("Đang chạy logic setup hook...")
@@ -176,9 +168,9 @@ async def on_command_error(ctx: commands.Context, error):
 # --- Chạy Bot ---
 async def main():
     """Hàm async chính để thiết lập và chạy bot."""
-    # Không cần gọi load_dotenv() trong config.py nữa nếu đã gọi ở đầu file bot.py
+
     config.check_critical_config()
-    bot_setup.configure_logging() # configure_logging nên được gọi sau load_dotenv
+    bot_setup.configure_logging() 
 
     log.info("Đang cố gắng chạy bot...")
     try:

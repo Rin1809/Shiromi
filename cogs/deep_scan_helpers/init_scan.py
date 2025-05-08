@@ -40,7 +40,7 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
             await ctx.author.send(f"Không thể bắt đầu quét server `{server.name}` do không thể gửi tin nhắn vào kênh `{ctx.channel.name}`.")
         except Exception:
             pass
-        return False # Lỗi nghiêm trọng, không thể tiếp tục
+        return False 
 
     # --- Tạo Log Thread và đặt làm target ---
     try:
@@ -100,7 +100,7 @@ async def initialize_scan(scan_data: Dict[str, Any]) -> bool:
         return False 
 
     # --- Lọc kênh và kiểm tra quyền truy cập kênh ---
-    await _filter_accessible_channels(scan_data) # Sửa đổi ở đây
+    await _filter_accessible_channels(scan_data) 
     total_accessible_channels = len(scan_data["accessible_channels"])
     log.info(f"Tìm thấy [green]{total_accessible_channels}[/] kênh có thể quét, [yellow]{scan_data['skipped_channels_count']}[/] bị bỏ qua.")
 
@@ -285,7 +285,7 @@ async def _filter_accessible_channels(scan_data: Dict[str, Any]):
     server: discord.Guild = scan_data["server"]
     bot: commands.Bot = scan_data["bot"]
     scan_errors: List[str] = scan_data["scan_errors"]
-    channel_details: List[Dict[str, Any]] = scan_data.setdefault("channel_details", []) # Đảm bảo list tồn tại
+    channel_details: List[Dict[str, Any]] = scan_data.setdefault("channel_details", []) 
     accessible_channels: List[Union[discord.TextChannel, discord.VoiceChannel]] = []
     skipped_channels_count = 0
     
@@ -313,7 +313,7 @@ async def _filter_accessible_channels(scan_data: Dict[str, Any]):
                     "error": f"Bỏ qua do {reason}", "processed": False,
                     "message_count": 0, "reaction_count": 0, "threads_data": []
                 })
-                continue # Bỏ qua kênh này
+                continue
             # --- KẾT THÚC KIỂM TRA ---
 
             perms = channel.permissions_for(server.me)

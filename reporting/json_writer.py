@@ -52,8 +52,8 @@ async def create_json_report(
     user_mention_received_counts: Optional[collections.Counter] = None,
     user_reply_counts: Optional[collections.Counter] = None,
     user_reaction_received_counts: Optional[collections.Counter] = None,
-    user_reaction_given_counts: Optional[collections.Counter] = None, # Thêm mới
-    user_reaction_emoji_given_counts: Optional[defaultdict] = None, # Thêm mới
+    user_reaction_given_counts: Optional[collections.Counter] = None, 
+    user_reaction_emoji_given_counts: Optional[defaultdict] = None,
     user_other_file_counts: Optional[collections.Counter] = None,
     user_most_active_channel: Optional[Dict[int, Tuple[int, int]]] = None,
 ) -> Optional[discord.File]:
@@ -64,7 +64,7 @@ async def create_json_report(
             "scan_end_time_utc": scan_timestamp.isoformat(),
             "bot_name": getattr(bot.user, 'name', 'Unknown Bot'),
             "bot_id": str(getattr(bot.user, 'id', 0)),
-            "report_schema_version": "1.3", # Bump version for reaction givers
+            "report_schema_version": "1.3",
         },
         "server_info": {
             "id": str(server.id), "name": server.name, "owner_id": str(server.owner_id) if server.owner_id else None,
@@ -159,7 +159,7 @@ async def create_json_report(
     lb["custom_emoji_server_content_users"] = user_total_custom_emoji_content_counts; lb["sticker_senders"] = user_sticker_counts
     lb["mention_givers"] = user_mention_given_counts; lb["mention_receivers"] = user_mention_received_counts
     lb["repliers"] = user_reply_counts; lb["reaction_receivers"] = user_reaction_received_counts
-    lb["reaction_givers"] = user_reaction_given_counts # Thêm mới
+    lb["reaction_givers"] = user_reaction_given_counts 
     # Chuyển đổi defaultdict(Counter) thành dict(dict) cho JSON
     if user_reaction_emoji_given_counts:
         lb["reaction_emoji_given_by_user"] = {str(uid): dict(counts) for uid, counts in user_reaction_emoji_given_counts.items()}
