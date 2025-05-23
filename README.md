@@ -630,14 +630,17 @@ Shiromi/
 ## Image 1 (Server):
 
 ![image](https://github.com/user-attachments/assets/b402929b-5043-4991-999d-4b4daefd9991)
-
-## Image 2 (Server):
-
 ![image](https://github.com/user-attachments/assets/1a150747-062b-491f-a363-bcc10f3af86d)
 
-## Image 3 (DM:
+## Image 2 (DM:
 
 ![image](https://github.com/user-attachments/assets/e648e102-23ec-428f-a4f3-8bd193d17b8f)
 ![image](https://github.com/user-attachments/assets/f2661310-7422-41f2-ac02-ccdd787aa4ac)
+
+
+## Image 3 (CMD log):
+![image](https://github.com/user-attachments/assets/7304c1a7-349a-40fc-b609-8118f71a9517)
+![image](https://github.com/user-attachments/assets/8d5d1409-4f33-4ae5-bc20-4be014e6ceaa)
+
 
 
