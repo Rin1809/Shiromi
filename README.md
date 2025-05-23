@@ -139,19 +139,18 @@ Các lệnh chính được gọi qua tiền tố đã cấu hình (ví dụ: `S
 
 *   **Chế độ Test (Gửi DM cho Admin):**
     *   `[prefix]romi [export_csv=True/False] [export_json=True/False] [keywords=từ khóa1,từ khóa2]`
-    *   Ví dụ: `Shi romi export_csv=True keywords=chào,tạm biệt`
+    *   Ví dụ: `Shiromi export_csv=True keywords=chào,tạm biệt`
     *   Mặc định: `export_csv=False`, `export_json=False`, không tìm keywords.
     *   Báo cáo DM cá nhân sẽ được gửi đến `ADMIN_USER_ID` đã cấu hình.
 *   **Chế độ Bình Thường (Gửi DM cho Role Cấu Hình):**
-    *   `[prefix]Shiromi [export_csv=True/False] [export_json=True/False] [keywords=từ khóa1,từ khóa2]`
-    *   Ví dụ: `Shi Shiromi export_json=True`
+    *   `Shiromi`
     *   Báo cáo DM cá nhân sẽ được gửi đến những người dùng có `DM_REPORT_RECIPIENT_ROLE_ID`.
 *   **Kiểm tra Bot:**
     *   `[prefix]ping_shiromi`
     *   Kiểm tra xem bot có phản hồi không và hiển thị độ trễ.
 
 **Lưu ý về PROXY_BOT_ID:**
-Nếu `PROXY_BOT_ID` được cấu hình, bot đó có thể gọi lệnh của Shiromi bằng cách gửi tin nhắn bắt đầu trực tiếp bằng tên lệnh (không cần tiền tố `COMMAND_PREFIX` của Shiromi). Ví dụ, nếu bot proxy gửi `romi export_csv=True`, Shiromi sẽ hiểu và thực thi.
+Nếu `PROXY_BOT_ID` được cấu hình, bot đó có thể gọi lệnh của Shiromi bằng cách gửi tin nhắn bắt đầu trực tiếp bằng tên lệnh (không cần tiền tố `COMMAND_PREFIX` của Shiromi). Ví dụ, nếu bot proxy gửi `romi`, Shiromi sẽ hiểu và thực thi.
 
 ## Cấu trúc thư mục
 
@@ -347,20 +346,19 @@ The bot will connect to Discord and be ready to receive commands.
 Main commands are invoked using the configured prefix (e.g., `Shi`).
 
 *   **Test Mode (Sends DMs to Admin):**
-    *   `[prefix]romi [export_csv=True/False] [export_json=True/False] [keywords=keyword1,keyword2]`
-    *   Example: `Shi romi export_csv=True keywords=hello,goodbye`
+    *   `[prefix]romi`
+    *   Example: `Shiromi export_csv=True keywords=hello,goodbye`
     *   Defaults: `export_csv=False`, `export_json=False`, no keywords.
     *   Personalized DM reports will be sent to the configured `ADMIN_USER_ID`.
 *   **Normal Mode (Sends DMs to Configured Role):**
-    *   `[prefix]Shiromi [export_csv=True/False] [export_json=True/False] [keywords=keyword1,keyword2]`
-    *   Example: `Shi Shiromi export_json=True`
+    *   `Shiromi`
     *   Personalized DM reports will be sent to users with the `DM_REPORT_RECIPIENT_ROLE_ID`.
 *   **Bot Check:**
     *   `[prefix]ping_shiromi`
     *   Checks if the bot is responsive and shows latency.
 
 **Note on PROXY_BOT_ID:**
-If `PROXY_BOT_ID` is configured, that bot can invoke Shiromi's commands by sending a message starting directly with the command name (no need for Shiromi's `COMMAND_PREFIX`). For example, if the proxy bot sends `romi export_csv=True`, Shiromi will understand and execute it.
+If `PROXY_BOT_ID` is configured, that bot can invoke Shiromi's commands by sending a message starting directly with the command name (no need for Shiromi's `COMMAND_PREFIX`). For example, if the proxy bot sends `romi`, Shiromi will understand and execute it.
 
 ## Folder Structure
 
@@ -556,20 +554,18 @@ python bot.py
 主なコマンドは、設定されたプレフィックス (例: `Shi`) を使用して呼び出します。
 
 *   **テストモード (管理者にDMを送信):**
-    *   `[prefix]romi [export_csv=True/False] [export_json=True/False] [keywords=キーワード1,キーワード2]`
-    *   例: `Shi romi export_csv=True keywords=こんにちは,さようなら`
-    *   デフォルト: `export_csv=False`, `export_json=False`, キーワードなし。
+    *   `[prefix]romi [keywords=キーワード1,キーワード2]`
+    *   例: `Shiromi keywords=こんにちは,さようなら`
     *   パーソナライズDMレポートは、設定された `ADMIN_USER_ID` に送信されます。
 *   **通常モード (設定されたロールにDMを送信):** （まだ利用できないです）
-    *   `[prefix]Shiromi [export_csv=True/False] [export_json=True/False] [keywords=キーワード1,キーワード2]`
-    *   例: `Shi Shiromi export_json=True`
+    *   `Shiromi`
     *   パーソナライズDMレポートは、`DM_REPORT_RECIPIENT_ROLE_ID` を持つユーザーに送信されます。
 *   **ボットチェック:**
     *   `[prefix]ping_shiromi`
     *   ボットが応答するかどうかを確認し、遅延を表示します。
 
 **PROXY_BOT_IDに関する注意:**
-`PROXY_BOT_ID` が設定されている場合、そのボットはShiromiの `COMMAND_PREFIX` なしで、コマンド名で始まるメッセージを送信することでShiromiのコマンドを呼び出すことができます。例えば、プロキシボットが `romi export_csv=True` と送信すると、Shiromiはそれを理解して実行します。
+`PROXY_BOT_ID` が設定されている場合、そのボットはShiromiの `COMMAND_PREFIX` なしで、コマンド名で始まるメッセージを送信することでShiromiのコマンドを呼び出すことができます。例えば、プロキシボットが `romi` と送信すると、Shiromiはそれを理解して実行します。
 
 ## フォルダ構造
 
