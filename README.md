@@ -10,6 +10,9 @@
 
 Ngoài ra, Shiromi có khả năng lưu trữ dữ liệu quét vào cơ sở dữ liệu PostgreSQL, cho phép tra cứu và hiển thị thông tin qua một giao diện web (nếu được tích hợp).
 
+Giao diện để tra cứu kết quả thành viên sau khi quét: 
+--> Check: https://github.com/Rin1809/Shiromi-searchweb
+
 **Các chức năng chính:**
 
 *   **Quét Toàn Diện:** Thu thập dữ liệu từ tất cả các kênh text, voice (chat), và luồng (bao gồm cả luồng lưu trữ nếu có quyền).
@@ -216,6 +219,9 @@ Shiromi/
 
 Additionally, Shiromi can store scan data in a PostgreSQL database, enabling data retrieval and display through a web interface (if integrated).
 
+Web interface to search for user's data after all :
+---> Check : https://github.com/Rin1809/Shiromi-searchweb
+
 **Main functionalities:**
 
 *   **Comprehensive Scanning:** Collects data from all text channels, voice channels (chat), and threads (including archived threads if permissions allow).
@@ -421,6 +427,9 @@ Shiromi/
 **Shiromi (シロミ)** は、Discordサーバーの活動データを詳細にスキャンおよび分析するために設計された強力なDiscordボットです。メッセージ、メンバーの活動、絵文字/スタンプの使用状況、ロール、チャンネル、スレッドなどに関する詳細情報を収集します。分析結果は、Discord内の視覚的に魅力的な埋め込みレポート、CSV/JSONエクスポートファイル、およびメンバー向けのパーソナライズされたDMレポートとして表示されます。
 
 さらに、ShiromiはスキャンデータをPostgreSQLデータベースに保存でき、Webインターフェース（統合されている場合）を介したデータ検索と表示を可能にします。
+
+Userのダタを検索のWeb インターフェースです：
+ーー＞確認：https://github.com/Rin1809/Shiromi-searchweb
 
 **主な機能:**
 
