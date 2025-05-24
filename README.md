@@ -1,4 +1,4 @@
-# Shiromi - Bot Phân Tích Sâu Server Discord ᓚᘏᗢ
+# Shiromi - Deep Analysis Server Discord Bot ᓚᘏᗢ
 
 <!-- Vietnamese -->
 <details>
